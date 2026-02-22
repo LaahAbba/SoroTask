@@ -2,7 +2,7 @@ import EventEmitter from "events";
 import pLimit from "p-limit";
 
 export class ExecutionQueue extends EventEmitter {
-  constructor(limit) {
+  constructor(limit, metricsServer) {
     super();
 
     this.concurrencyLimit = parseInt(
@@ -11,6 +11,7 @@ export class ExecutionQueue extends EventEmitter {
     );
 
     this.limit = pLimit(this.concurrencyLimit);
+    this.metricsServer = metricsServer;
 
     this.depth = 0;
     this.inFlight = 0;
@@ -28,6 +29,13 @@ export class ExecutionQueue extends EventEmitter {
 
     this.depth = validTaskIds.length;
 
+    // Track tasks due for this cycle
+    if (this.metricsServer) {
+      this.metricsServer.increment("tasksDueTotal", validTaskIds.length);
+    }
+
+    const cycleStartTime = Date.now();
+
     const cyclePromises = validTaskIds.map((taskId) => {
       return this.limit(async () => {
         this.inFlight++;
@@ -38,10 +46,16 @@ export class ExecutionQueue extends EventEmitter {
         try {
           await executorFn(taskId);
           this.completed++;
+          if (this.metricsServer) {
+            this.metricsServer.increment("tasksExecutedTotal");
+          }
           this.emit("task:success", taskId);
         } catch (error) {
           this.failedCount++;
           this.failedTasks.add(taskId);
+          if (this.metricsServer) {
+            this.metricsServer.increment("tasksFailedTotal");
+          }
           this.emit("task:failed", taskId, error);
         } finally {
           this.inFlight--;
@@ -56,6 +70,11 @@ export class ExecutionQueue extends EventEmitter {
     } catch (_) {
       // already handled
     } finally {
+      const cycleDuration = Date.now() - cycleStartTime;
+      if (this.metricsServer) {
+        this.metricsServer.record("lastCycleDurationMs", cycleDuration);
+      }
+
       this.emit("cycle:complete", {
         depth: this.depth,
         inFlight: this.inFlight,

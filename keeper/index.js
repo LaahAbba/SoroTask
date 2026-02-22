@@ -33,6 +33,7 @@ async function main() {
     logger,
     rpc,
     keeperAccount,
+    metricsServer,
   });
 
   poller.start();
