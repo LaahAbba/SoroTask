@@ -10,7 +10,13 @@
     "test:coverage": "jest --coverage",
     "lint": "echo \"No linting configured\""
   },
-  "keywords": ["soroban", "stellar", "keeper", "automation", "smart-contracts"],
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper",
+    "automation",
+    "smart-contracts"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {

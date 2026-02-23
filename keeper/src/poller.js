@@ -1,4 +1,5 @@
 const pLimit = require('p-limit');
+const { Contract, xdr, TransactionBuilder, BASE_FEE, Networks, scValToNative } = require('@stellar/stellar-sdk');
 
 /**
  * Production-grade polling engine for SoroTask Keeper.
@@ -9,18 +10,17 @@ class TaskPoller {
     constructor(server, contractId, options = {}) {
         this.server = server;
         this.contractId = contractId;
-        
+
         // Configuration with defaults
         this.maxConcurrentReads = parseInt(
             options.maxConcurrentReads || process.env.MAX_CONCURRENT_READS || 10,
             10
         );
-        
+
         // Create concurrency limiter for parallel task reads
-        const pLimitMod = pLimit;
-        const limitFn = pLimitMod.default || pLimitMod;
+        const limitFn = pLimit.default || pLimit;
         this.readLimit = limitFn(this.maxConcurrentReads);
-        
+
         // Statistics
         this.stats = {
             lastPollTime: null,
@@ -54,32 +54,32 @@ class TaskPoller {
             // Fetch current ledger timestamp
             const ledgerInfo = await this.server.getLatestLedger();
             const currentTimestamp = ledgerInfo.sequence; // Using sequence as timestamp proxy
-            
+
             // Note: In production, you'd want to use the actual ledger timestamp
             // which might require additional RPC calls or using ledger.timestamp from contract context
             console.log(`[Poller] Current ledger sequence: ${currentTimestamp}`);
 
             // Process tasks in parallel with concurrency control
-            const taskChecks = taskIds.map(taskId => 
+            const taskChecks = taskIds.map(taskId =>
                 this.readLimit(() => this.checkTask(taskId, currentTimestamp))
             );
 
             const results = await Promise.allSettled(taskChecks);
-            
+
             // Collect due task IDs from successful checks
             const dueTaskIds = [];
-            
+
             results.forEach((result, index) => {
                 if (result.status === 'fulfilled' && result.value) {
                     const { isDue, taskId, reason } = result.value;
-                    
+
                     if (isDue) {
                         dueTaskIds.push(taskId);
                         this.stats.tasksDue++;
                     } else if (reason === 'skipped') {
                         this.stats.tasksSkipped++;
                     }
-                    
+
                     this.stats.tasksChecked++;
                 } else if (result.status === 'rejected') {
                     this.stats.errors++;
@@ -91,7 +91,7 @@ class TaskPoller {
             this.logPollSummary(duration);
 
             return dueTaskIds;
-            
+
         } catch (error) {
             console.error('[Poller] Fatal error during polling cycle:', error);
             this.stats.errors++;
@@ -110,7 +110,7 @@ class TaskPoller {
         try {
             // Read task configuration from contract using view call
             const taskConfig = await this.getTaskConfig(taskId);
-            
+
             if (!taskConfig) {
                 console.warn(`[Poller] Task ${taskId} not found (may have been deregistered)`);
                 return { isDue: false, taskId, reason: 'not_found' };
@@ -135,7 +135,7 @@ class TaskPoller {
             }
 
             return { isDue, taskId };
-            
+
         } catch (error) {
             console.error(`[Poller] Error checking task ${taskId}:`, error.message);
             throw error;
@@ -151,11 +151,8 @@ class TaskPoller {
      */
     async getTaskConfig(taskId) {
         try {
-            // Build the contract call for get_task
-            const { Contract, xdr } = require('soroban-client');
-            
             const contract = new Contract(this.contractId);
-            
+
             // Create the operation to call get_task
             const operation = contract.call(
                 'get_task',
@@ -168,8 +165,6 @@ class TaskPoller {
                 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
             );
 
-            const { TransactionBuilder, BASE_FEE, Networks } = require('soroban-client');
-            
             const transaction = new TransactionBuilder(account, {
                 fee: BASE_FEE,
                 networkPassphrase: process.env.NETWORK_PASSPHRASE || Networks.FUTURENET
@@ -179,13 +174,13 @@ class TaskPoller {
                 .build();
 
             const simulated = await this.server.simulateTransaction(transaction);
-            
+
             if (!simulated.results || simulated.results.length === 0) {
                 return null;
             }
 
             const result = simulated.results[0];
-            
+
             if (!result.retval) {
                 return null;
             }
@@ -193,7 +188,7 @@ class TaskPoller {
             // Decode the XDR result
             const taskConfig = this.decodeTaskConfig(result.retval);
             return taskConfig;
-            
+
         } catch (error) {
             // Task might not exist or other error occurred
             if (error.message && error.message.includes('not found')) {
@@ -211,8 +206,6 @@ class TaskPoller {
      */
     decodeTaskConfig(scVal) {
         try {
-            const { xdr, Address, scValToNative } = require('soroban-client');
-            
             // Check if it's an Option::None
             if (scVal.switch().name === 'scvVoid') {
                 return null;
@@ -275,7 +268,7 @@ class TaskPoller {
             });
 
             return config;
-            
+
         } catch (error) {
             console.error('[Poller] Error decoding TaskConfig XDR:', error);
             return null;
