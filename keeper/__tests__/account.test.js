@@ -2,17 +2,15 @@ const { initializeKeeperAccount } = require('../src/account');
 const { rpc, Keypair } = require('@stellar/stellar-sdk');
 const { Server } = rpc;
 
-jest.mock('@stellar/stellar-sdk', () => {
-    return {
-        rpc: {
-            Server: jest.fn()
-        },
-        Keypair: {
-            fromSecret: jest.fn()
-        },
-        Account: jest.fn()
-    };
-});
+jest.mock('@stellar/stellar-sdk', () => ({
+    Keypair: {
+        fromSecret: jest.fn()
+    },
+    rpc: {
+        Server: jest.fn()
+    },
+    Account: jest.fn()
+}));
 
 describe('Keeper Account Module', () => {
     const mockSecret = 'SAZMBLI37L2O56N5LJS5X4K5LJS5X4K5LJS5X4K5LJS5X4K5LJS5X4K';
