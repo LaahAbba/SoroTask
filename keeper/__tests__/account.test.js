@@ -1,16 +1,26 @@
 const { initializeKeeperAccount } = require('../src/account');
-const { rpc, Keypair } = require('@stellar/stellar-sdk');
-const { Server } = rpc;
 
-jest.mock('@stellar/stellar-sdk', () => ({
-    Keypair: {
-        fromSecret: jest.fn()
-    },
-    rpc: {
-        Server: jest.fn()
-    },
-    Account: jest.fn()
-}));
+// Create mock functions that can be configured
+const mockGetAccount = jest.fn();
+
+// Mock @stellar/stellar-sdk
+jest.mock('@stellar/stellar-sdk', () => {
+    return {
+        Keypair: {
+            fromSecret: jest.fn(() => ({
+                publicKey: () => 'GDRS6QYI6N5LJS5X4K5LJS5X4K5LJS5X4K5LJS5X4K5LJS5X4K5LJS5'
+            }))
+        },
+        rpc: {
+            Server: jest.fn().mockImplementation(() => ({
+                getAccount: mockGetAccount
+            }))
+        },
+        Account: jest.fn()
+    };
+});
+
+const { Keypair, rpc: { Server } } = require('@stellar/stellar-sdk');
 
 describe('Keeper Account Module', () => {
     const mockSecret = 'SAZMBLI37L2O56N5LJS5X4K5LJS5X4K5LJS5X4K5LJS5X4K5LJS5X4K';
@@ -18,13 +28,10 @@ describe('Keeper Account Module', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockGetAccount.mockReset();
         process.env.KEEPER_SECRET = mockSecret;
         process.env.MIN_KEEPER_BALANCE_XLM = '1.0';
         delete process.env.HALT_ON_LOW_BALANCE;
-
-        Keypair.fromSecret.mockReturnValue({
-            publicKey: () => mockPublicKey
-        });
     });
 
     it('should successfully load and validate a funded account', async () => {
@@ -36,7 +43,7 @@ describe('Keeper Account Module', () => {
             ]
         };
 
-        Server.prototype.getAccount = jest.fn().mockResolvedValue(mockAccount);
+        mockGetAccount.mockResolvedValue(mockAccount);
 
         const result = await initializeKeeperAccount();
 
@@ -52,7 +59,7 @@ describe('Keeper Account Module', () => {
     it('should throw 404 error with clear message when account not found', async () => {
         const error = new Error('Not Found');
         error.response = { status: 404 };
-        Server.prototype.getAccount = jest.fn().mockRejectedValue(error);
+        mockGetAccount.mockRejectedValue(error);
 
         await expect(initializeKeeperAccount()).rejects.toThrow(/not found on-chain/);
     });
@@ -65,7 +72,7 @@ describe('Keeper Account Module', () => {
                 { asset_type: 'native', balance: '0.5' }
             ]
         };
-        Server.prototype.getAccount = jest.fn().mockResolvedValue(mockAccount);
+        mockGetAccount.mockResolvedValue(mockAccount);
 
         const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
 
@@ -84,7 +91,7 @@ describe('Keeper Account Module', () => {
                 { asset_type: 'native', balance: '0.5' }
             ]
         };
-        Server.prototype.getAccount = jest.fn().mockResolvedValue(mockAccount);
+        mockGetAccount.mockResolvedValue(mockAccount);
 
         await expect(initializeKeeperAccount()).rejects.toThrow(/HALTING: Keeper balance/);
     });
