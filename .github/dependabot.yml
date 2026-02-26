@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # 1. GitHub Actions infrastructure
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-updates:
+        patterns:
+          - "*"
+
+  # 2. Rust Smart Contract
+  - package-ecosystem: "cargo"
+    directory: "/contract"
+    schedule:
+      interval: "weekly"
+    groups:
+      contract-dependencies:
+        patterns:
+          - "*"
+
+  # 3. Node.js Keeper Bot
+  - package-ecosystem: "npm"
+    directory: "/keeper"
+    schedule:
+      interval: "weekly"
+    groups:
+      keeper-dependencies:
+        patterns:
+          - "*"
+
+  # 4. Next.js Frontend
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    groups:
+      frontend-dependencies:
+        patterns:
+          - "*"

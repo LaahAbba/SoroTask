@@ -1,56 +1,169 @@
-import { loadConfig } from "./src/config.js";
-import { createLogger } from "./src/logger.js";
-import { createRpc } from "./src/rpc.js";
-import { loadAccount } from "./src/account.js";
-import { createPoller } from "./src/poller.js";
-import { GasMonitor } from "./src/gasMonitor.js";
-import { MetricsServer } from "./src/metrics.js";
+require('dotenv').config();
+const { Keypair, rpc, Contract, TransactionBuilder, BASE_FEE, Networks, xdr } = require('@stellar/stellar-sdk');
+const { Server } = rpc;
+
+const { loadConfig } = require('./src/config');
+const { initializeKeeperAccount } = require('./src/account');
+const { ExecutionQueue } = require('./src/queue');
+const TaskPoller = require('./src/poller');
+const TaskRegistry = require('./src/registry');
 
 async function main() {
-  const config = loadConfig();
-  const logger = createLogger();
+    console.log("Starting SoroTask Keeper...");
 
-  const gasMonitor = new GasMonitor(logger);
-  const metricsServer = new MetricsServer(gasMonitor, logger);
+    let config;
+    try {
+        config = loadConfig();
+        console.log(`Configured for network: ${config.networkPassphrase}`);
+        console.log(`RPC URL: ${config.rpcUrl}`);
+    } catch (err) {
+        console.error(`Configuration error: ${err.message}`);
+        process.exit(1);
+    }
 
-  metricsServer.start();
+    let keeperData;
+    try {
+        keeperData = await initializeKeeperAccount();
+    } catch (err) {
+        console.error(`Failed to initialize keeper: ${err.message}`);
+        process.exit(1);
+    }
 
-  logger.info("Starting SoroTask Keeper...");
-  logger.info("Configured network", {
-    networkPassphrase: config.networkPassphrase,
-    rpcUrl: config.rpcUrl,
-  });
+    const { keypair, accountResponse } = keeperData;
+    const server = new Server(config.rpcUrl);
 
-  const rpc = await createRpc(config, logger);
-  const keeperAccount = loadAccount(config);
+    // Initialize polling engine
+    const poller = new TaskPoller(server, config.contractId, {
+        maxConcurrentReads: process.env.MAX_CONCURRENT_READS
+    });
+    console.log(`Poller initialized for contract: ${config.contractId}`);
 
-  logger.info("Keeper account loaded", {
-    publicKey: keeperAccount.publicKey(),
-  });
+    // Initialize execution queue
+    const queue = new ExecutionQueue();
 
-  const poller = createPoller({
-    config,
-    logger,
-    rpc,
-    keeperAccount,
-    metricsServer,
-  });
+    queue.on('task:started', (taskId) => console.log(`[Queue] Started execution for task ${taskId}`));
+    queue.on('task:success', (taskId) => console.log(`[Queue] Task ${taskId} executed successfully`));
+    queue.on('task:failed', (taskId, err) => console.error(`[Queue] Task ${taskId} failed:`, err.message));
+    queue.on('cycle:complete', (stats) => console.log(`[Queue] Cycle complete: ${JSON.stringify(stats)}`));
 
-  poller.start();
+    // Task executor function - calls contract.execute(keeper, task_id)
+    const executeTask = async (taskId) => {
+        try {
+            // Build the execute transaction
+            const contract = new Contract(config.contractId);
+            const account = await server.getAccount(keypair.publicKey());
 
-  const shutdown = async (signal) => {
-    logger.info(`Received ${signal}. Starting graceful shutdown...`);
-    await poller.stop?.();
-    metricsServer.stop();
-    logger.info("Shutdown complete.");
-    process.exit(0);
-  };
+            const operation = contract.call(
+                'execute',
+                keypair.publicKey(), // keeper address
+                taskId // task_id
+            );
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+            const transaction = new TransactionBuilder(account, {
+                fee: BASE_FEE,
+                networkPassphrase: config.networkPassphrase || Networks.FUTURENET
+            })
+                .addOperation(operation)
+                .setTimeout(30)
+                .build();
+
+            transaction.sign(keypair);
+
+            // Submit the transaction
+            const response = await server.sendTransaction(transaction);
+            console.log(`[Executor] Task ${taskId} transaction submitted: ${response.hash}`);
+
+            // Wait for confirmation (optional, can be made configurable)
+            if (process.env.WAIT_FOR_CONFIRMATION !== 'false') {
+                let status = await server.getTransaction(response.hash);
+                let attempts = 0;
+                const maxAttempts = 10;
+
+                while (status.status === 'PENDING' && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    status = await server.getTransaction(response.hash);
+                    attempts++;
+                }
+
+                if (status.status === 'SUCCESS') {
+                    console.log(`[Executor] Task ${taskId} executed successfully`);
+                } else {
+                    throw new Error(`Transaction failed with status: ${status.status}`);
+                }
+            }
+
+        } catch (error) {
+            console.error(`[Executor] Failed to execute task ${taskId}:`, error.message);
+            throw error;
+        }
+    };
+
+    // Initialize event-driven task registry
+    const registry = new TaskRegistry(server, config.contractId, {
+        startLedger: parseInt(process.env.START_LEDGER || '0', 10)
+    });
+    await registry.init();
+
+    // Polling loop
+    const pollingIntervalMs = config.pollIntervalMs;
+    console.log(`Starting polling loop with interval: ${pollingIntervalMs}ms`);
+
+    const pollingInterval = setInterval(async () => {
+        try {
+            console.log('\n[Keeper] ===== Starting new polling cycle =====');
+
+            // Poll for new TaskRegistered events
+            await registry.poll();
+
+            // Get list of all registered task IDs
+            const taskIds = registry.getTaskIds();
+            console.log(`[Keeper] Checking ${taskIds.length} tasks...`);
+
+            // Poll for due tasks
+            const dueTaskIds = await poller.pollDueTasks(taskIds);
+
+            if (dueTaskIds.length > 0) {
+                console.log(`[Keeper] Found ${dueTaskIds.length} due tasks, enqueueing for execution...`);
+                await queue.enqueue(dueTaskIds, executeTask);
+            } else {
+                console.log('[Keeper] No tasks due for execution');
+            }
+
+            console.log('[Keeper] ===== Polling cycle complete =====\n');
+
+        } catch (error) {
+            console.error('[Keeper] Error in polling cycle:', error);
+        }
+    }, pollingIntervalMs);
+
+    // Graceful shutdown handling
+    const shutdown = async (signal) => {
+        console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
+        clearInterval(pollingInterval);
+        await queue.drain();
+        console.log("Graceful shutdown complete. Exiting.");
+        process.exit(0);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+
+    // Run first poll immediately
+    console.log('[Keeper] Running initial poll...');
+    setTimeout(async () => {
+        try {
+            const taskIds = registry.getTaskIds();
+            const dueTaskIds = await poller.pollDueTasks(taskIds);
+            if (dueTaskIds.length > 0) {
+                await queue.enqueue(dueTaskIds, executeTask);
+            }
+        } catch (error) {
+            console.error('[Keeper] Error in initial poll:', error);
+        }
+    }, 1000);
 }
 
 main().catch((err) => {
-  console.error("Fatal Keeper Error:", err);
-  process.exit(1);
+    console.error("Fatal Keeper Error:", err);
+    process.exit(1);
 });
