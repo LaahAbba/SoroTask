@@ -12,9 +12,9 @@ pub enum Error {
     Unauthorized = 2,
     InsufficientBalance = 3,
     NotInitialized = 4,
-    TaskPaused = 5,       
-    TaskAlreadyPaused = 6, 
-    TaskAlreadyActive = 7, 
+    TaskPaused = 5,
+    TaskAlreadyPaused = 6,
+    TaskAlreadyActive = 7,
 }
 
 #[contracttype]
@@ -29,7 +29,7 @@ pub struct TaskConfig {
     pub last_run: u64,
     pub gas_balance: i128,
     pub whitelist: Vec<Address>,
-    pub is_active: bool,  
+    pub is_active: bool,
 }
 
 #[contracttype]
@@ -50,7 +50,7 @@ pub struct SoroTaskContract;
 impl SoroTaskContract {
     /// Registers a new task in the marketplace.
     /// Returns the unique sequential ID of the registered task.
-    pub fn register(env: Env,mut config: TaskConfig) -> u64 {
+    pub fn register(env: Env, mut config: TaskConfig) -> u64 {
         // Ensure the creator has authorized the registration
         config.creator.require_auth();
 
@@ -93,50 +93,50 @@ impl SoroTaskContract {
     }
 
     pub fn pause_task(env: Env, task_id: u64) {
-    let task_key = DataKey::Task(task_id);
-    let mut config: TaskConfig = env
-        .storage()
-        .persistent()
-        .get(&task_key)
-        .expect("Task not found");
+        let task_key = DataKey::Task(task_id);
+        let mut config: TaskConfig = env
+            .storage()
+            .persistent()
+            .get(&task_key)
+            .expect("Task not found");
 
-    config.creator.require_auth();
+        config.creator.require_auth();
 
-    if !config.is_active {
-        panic_with_error!(&env, Error::TaskAlreadyPaused);
+        if !config.is_active {
+            panic_with_error!(&env, Error::TaskAlreadyPaused);
+        }
+
+        config.is_active = false;
+        env.storage().persistent().set(&task_key, &config);
+
+        env.events().publish(
+            (Symbol::new(&env, "TaskPaused"), task_id),
+            config.creator.clone(),
+        );
     }
 
-    config.is_active = false;
-    env.storage().persistent().set(&task_key, &config);
+    pub fn resume_task(env: Env, task_id: u64) {
+        let task_key = DataKey::Task(task_id);
+        let mut config: TaskConfig = env
+            .storage()
+            .persistent()
+            .get(&task_key)
+            .expect("Task not found");
 
-    env.events().publish(
-        (Symbol::new(&env, "TaskPaused"), task_id),
-        config.creator.clone(),
-    );
-}
+        config.creator.require_auth();
 
-pub fn resume_task(env: Env, task_id: u64) {
-    let task_key = DataKey::Task(task_id);
-    let mut config: TaskConfig = env
-        .storage()
-        .persistent()
-        .get(&task_key)
-        .expect("Task not found");
+        if config.is_active {
+            panic_with_error!(&env, Error::TaskAlreadyActive);
+        }
 
-    config.creator.require_auth();
+        config.is_active = true;
+        env.storage().persistent().set(&task_key, &config);
 
-    if config.is_active {
-        panic_with_error!(&env, Error::TaskAlreadyActive);
+        env.events().publish(
+            (Symbol::new(&env, "TaskResumed"), task_id),
+            config.creator.clone(),
+        );
     }
-
-    config.is_active = true;
-    env.storage().persistent().set(&task_key, &config);
-
-    env.events().publish(
-        (Symbol::new(&env, "TaskResumed"), task_id),
-        config.creator.clone(),
-    );
-}
     /// Executes a registered task identified by `task_id`.
     ///
     /// # Flow
@@ -165,9 +165,9 @@ pub fn resume_task(env: Env, task_id: u64) {
             .get(&task_key)
             .expect("Task not found");
 
-            if !config.is_active {
-                panic_with_error!(&env, Error::TaskPaused);
-            }
+        if !config.is_active {
+            panic_with_error!(&env, Error::TaskPaused);
+        }
 
         if !config.whitelist.is_empty() && !config.whitelist.contains(&keeper) {
             panic_with_error!(&env, Error::Unauthorized);
