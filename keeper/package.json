@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js | pino-pretty",
+    "mock-rpc": "node mock-rpc.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
