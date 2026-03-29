@@ -111,8 +111,23 @@ Every PR should:
 ## Commit Guidance
 
 - Use small, reviewable commits.
+- Use Conventional Commits so automated releases can determine version bumps and changelog entries.
 - Write clear commit messages describing intent.
 - Keep each commit logically coherent.
+
+Examples:
+
+```text
+feat(frontend): add wallet connection guard
+fix(keeper): retry failed task polling
+chore(contract): update soroban-sdk
+```
+
+Version bump behavior:
+
+- `fix:` triggers a patch release.
+- `feat:` triggers a minor release.
+- `!` or `BREAKING CHANGE:` triggers a major release.
 
 ## Reporting Bugs and Requesting Features
 

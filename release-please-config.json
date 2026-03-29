@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
+  "packages": {
+    "contract": {
+      "release-type": "rust",
+      "package-name": "soro_task_contract"
+    },
+    "frontend": {
+      "release-type": "node",
+      "package-name": "frontend"
+    },
+    "keeper": {
+      "release-type": "node",
+      "package-name": "keeper"
+    }
+  }
+}
