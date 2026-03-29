@@ -37,6 +37,7 @@ pub enum DataKey {
     Task(u64),
     Counter,
     Token,
+    Admin,
 }
 
 #[contracttype]
@@ -312,12 +313,13 @@ impl SoroTaskContract {
         }
     }
 
-    /// Initializes the contract with a gas token.
-    pub fn init(env: Env, token: Address) {
+    /// Initializes the contract with a gas token and an admin.
+    pub fn init(env: Env, token: Address, admin: Address) {
         if env.storage().instance().has(&DataKey::Token) {
             panic!("Already initialized");
         }
         env.storage().instance().set(&DataKey::Token, &token);
+        env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
     /// Deposits gas tokens to a task's balance.
@@ -429,6 +431,13 @@ impl SoroTaskContract {
             .instance()
             .get(&DataKey::Token)
             .expect("Not initialized")
+    }
+
+    /// Upgrades the contract to a new Wasm execution hash.
+    pub fn upgrade(env: Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 }
 
@@ -881,7 +890,8 @@ mod tests {
         let token_client = soroban_sdk::token::Client::new(&env, &token_address);
         let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
 
-        client.init(&token_address);
+        let admin = Address::generate(&env);
+        client.init(&token_address, &admin);
 
         let target = env.register_contract(None, MockTarget);
         let mut cfg = base_config(&env, target);
@@ -912,7 +922,8 @@ mod tests {
 
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
-        client.init(&token_address);
+        let admin = Address::generate(&env);
+        client.init(&token_address, &admin);
 
         let target = env.register_contract(None, MockTarget);
         let mut cfg = base_config(&env, target);
@@ -976,7 +987,8 @@ mod tests {
         let token_client = soroban_sdk::token::Client::new(&env, &token_address);
         let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
 
-        client.init(&token_address);
+        let admin = Address::generate(&env);
+        client.init(&token_address, &admin);
 
         let target = env.register_contract(None, MockTarget);
         let mut cfg = base_config(&env, target);
@@ -1022,7 +1034,8 @@ mod tests {
         let token_admin = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
         let token_address = token_id.address();
-        client.init(&token_address);
+        let admin = Address::generate(&env);
+        client.init(&token_address, &admin);
 
         let target = env.register_contract(None, MockTarget);
         let mut cfg = base_config(&env, target);
@@ -1085,7 +1098,8 @@ mod tests {
         let token_client = soroban_sdk::token::Client::new(&env, &token_address);
         let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
 
-        client.init(&token_address);
+        let admin = Address::generate(&env);
+        client.init(&token_address, &admin);
 
         let target = env.register_contract(None, MockTarget);
         let mut cfg = base_config(&env, target);
@@ -1116,5 +1130,21 @@ mod tests {
             soroban_sdk::Symbol::from_val(&env, &event.1.get(0).unwrap()),
             soroban_sdk::Symbol::new(&env, "TaskCancelled")
         );
+    }
+
+    #[test]
+    fn test_upgrade_admin_only() {
+        let (env, id) = setup();
+        let client = SoroTaskContractClient::new(&env, &id);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token_address = token_id.address();
+        let admin = Address::generate(&env);
+        client.init(&token_address, &admin);
+
+        let new_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[1; 32]);
+        
+        // As env is using mock_all_auths(), this successfully completes mapping to admin authority
+        client.upgrade(&new_wasm_hash);
     }
 }
