@@ -1,4 +1,5 @@
 import Image from "next/image";
+import TaskCreationForm from "./components/TaskCreationForm";
 
 export default function Home() {
   return (
@@ -21,28 +22,8 @@ export default function Home() {
           {/* Create Task Section */}
           <section className="space-y-6">
             <h2 className="text-2xl font-bold">Create Automation Task</h2>
-            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Target Contract Address</label>
-                <input type="text" placeholder="C..." className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
-                <input type="text" placeholder="harvest_yield" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
-                  <input type="number" placeholder="3600" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
-                  <input type="number" placeholder="10" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
-                </div>
-              </div>
-              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20">
-                Register Task
-              </button>
+            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 shadow-xl">
+              <TaskCreationForm />
             </div>
           </section>
 
