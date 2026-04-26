@@ -25,6 +25,7 @@ The system is designed to meet strict performance requirements (<100ms template 
 ```mermaid
 graph TD
     A[Task Creation Modal] -->|applies template| B[TemplateEngine]
+    A -->|hovers template| J[GhostPreview]
     C[Template Manager UI] -->|CRUD operations| D[Template Storage]
     B -->|validates| E[ValidationLayer]
     E -->|checks references| F[Label Registry]
@@ -32,10 +33,14 @@ graph TD
     B -->|reads| D
     B -->|computes dates| H[RelativeDateComputer]
     B -->|merges with| I[Existing Task Data]
+    J -->|simulates merge| B
+    J -->|validates| E
+    B -->|returns result| K[FieldHighlighter]
     
     style B fill:#4a9eff
     style E fill:#ff6b6b
     style D fill:#51cf66
+    style J fill:#ffd43b
 ```
 
 ### Component Responsibilities
@@ -65,9 +70,10 @@ graph TD
 - Implements indexing for fast template lookup
 
 **UI Components**
-- **TemplateSelector**: Dropdown/command palette in Task Creation Modal
+- **TemplateSelector**: Dropdown/command palette in Task Creation Modal with hover preview
+- **GhostPreview**: Translucent preview overlay showing template application result
 - **TemplateManager**: Dedicated settings page for template CRUD
-- **FieldHighlighter**: Visual feedback system for prefilled fields
+- **FieldHighlighter**: Visual feedback system with animations for prefilled fields
 
 ### Data Flow
 
@@ -223,15 +229,25 @@ class ValidationLayer {
 
 ```typescript
 interface RelativeDateRule {
-  offsetDays: number;
+  offsetDays: number; // Positive or negative integer offset from application time
 }
 
 class RelativeDateComputer {
   /**
    * Compute due date from relative date rule
-   * @param rule - Relative date specification
+   * @param rule - Relative date specification with offset from application time
    * @param baseDate - Base date for computation (defaults to now)
    * @returns ISO 8601 formatted date string
+   * 
+   * @example
+   * // Template applied on Dec 10, 2024 with offsetDays: 3
+   * compute({ offsetDays: 3 }, new Date('2024-12-10'))
+   * // Returns: '2024-12-13T00:00:00Z'
+   * 
+   * @remarks
+   * This design makes templates "evergreen" - they remain useful indefinitely
+   * because dates are calculated relative to application time, not stored as
+   * static dates that become stale.
    */
   compute(rule: RelativeDateRule, baseDate?: Date): string;
 
@@ -249,6 +265,7 @@ class RelativeDateComputer {
 interface TemplateSelectorProps {
   context: ApplicationContext;
   onTemplateSelect: (template: Template) => void;
+  onTemplateHover: (template: Template | null) => void;
   currentTaskData: Partial<TaskData>;
 }
 
@@ -269,7 +286,24 @@ interface TemplateManagerState {
 interface FieldHighlighterProps {
   fieldName: string;
   isPrefilled: boolean;
-  highlightDuration: number; // milliseconds
+  highlightDuration: number; // milliseconds (default: 2000)
+  animationType: 'fade' | 'pulse' | 'slide'; // animation style
+}
+
+// Ghost Preview Component
+interface GhostPreviewProps {
+  template: Template | null;
+  currentTaskData: Partial<TaskData>;
+  context: ApplicationContext;
+}
+
+interface GhostPreviewState {
+  previewData: TaskData;
+  mergeResult: {
+    fieldsToFill: string[];
+    fieldsToPreserve: string[];
+    fieldsToSkip: string[];
+  };
 }
 ```
 
@@ -300,6 +334,135 @@ Templates are stored as JSON documents with the following structure:
   "createdBy": "user_456"
 }
 ```
+
+### Complete JSON Schema Documentation
+
+**Schema Definition**:
+
+```typescript
+interface TemplateSchema {
+  // Required fields
+  id: string;                    // Unique identifier (format: "tmpl_<random>")
+  name: string;                  // Display name (1-100 characters)
+  scope: 'User' | 'Project' | 'Workspace';  // Visibility scope
+  scopeId: string;               // ID of the scope entity (userId, projectId, or workspaceId)
+  fields: TemplateFields;        // Prefill values for task fields
+  createdAt: string;             // ISO 8601 timestamp
+  updatedAt: string;             // ISO 8601 timestamp
+  createdBy: string;             // User ID of creator
+  
+  // Optional fields
+  description?: string;          // Template description (0-500 characters)
+  relativeDateRule?: {           // Relative date calculation
+    offsetDays: number;          // Integer offset from application time (can be negative)
+  };
+}
+
+interface TemplateFields {
+  title?: string;                // Prefill for task title (0-200 characters)
+  description?: string;          // Prefill for task description (0-2000 characters)
+  labels?: string[];             // Array of label IDs (0-10 labels)
+  assignee?: string;             // User ID for task assignee
+}
+```
+
+**Extensibility Design**:
+- New fields can be added to `TemplateFields` without breaking existing templates
+- Unknown fields in parsed JSON are preserved but ignored during application
+- Schema version field can be added in future for migrations
+- All optional fields default to undefined when omitted
+
+**Examples by Scope Type**:
+
+**User-Scoped Template** (visible only to creator):
+```json
+{
+  "id": "tmpl_user_001",
+  "name": "My Daily Standup Notes",
+  "description": "Personal template for daily standup preparation",
+  "scope": "User",
+  "scopeId": "user_alice_123",
+  "fields": {
+    "title": "Standup - ",
+    "description": "## Yesterday\n\n## Today\n\n## Blockers\n\n",
+    "labels": ["lbl_personal"]
+  },
+  "relativeDateRule": {
+    "offsetDays": 0
+  },
+  "createdAt": "2024-01-15T10:30:00Z",
+  "updatedAt": "2024-01-15T10:30:00Z",
+  "createdBy": "user_alice_123"
+}
+```
+
+**Project-Scoped Template** (visible to all project members):
+```json
+{
+  "id": "tmpl_proj_001",
+  "name": "Feature Request",
+  "description": "Template for new feature requests in Project Alpha",
+  "scope": "Project",
+  "scopeId": "proj_alpha_456",
+  "fields": {
+    "title": "[Feature] ",
+    "description": "## Problem Statement\n\n## Proposed Solution\n\n## Acceptance Criteria\n\n",
+    "labels": ["lbl_feature", "lbl_needs_review"],
+    "assignee": "user_product_manager"
+  },
+  "relativeDateRule": {
+    "offsetDays": 14
+  },
+  "createdAt": "2024-01-15T10:30:00Z",
+  "updatedAt": "2024-01-15T10:30:00Z",
+  "createdBy": "user_alice_123"
+}
+```
+
+**Workspace-Scoped Template** (visible to all workspace members):
+```json
+{
+  "id": "tmpl_ws_001",
+  "name": "Security Incident Report",
+  "description": "Company-wide template for security incidents",
+  "scope": "Workspace",
+  "scopeId": "ws_acme_corp",
+  "fields": {
+    "title": "[SECURITY] ",
+    "description": "## Incident Summary\n\n## Impact Assessment\n\n## Immediate Actions Taken\n\n## Root Cause\n\n## Prevention Plan\n\n",
+    "labels": ["lbl_security", "lbl_urgent", "lbl_incident"],
+    "assignee": "user_security_lead"
+  },
+  "relativeDateRule": {
+    "offsetDays": 1
+  },
+  "createdAt": "2024-01-15T10:30:00Z",
+  "updatedAt": "2024-01-15T10:30:00Z",
+  "createdBy": "user_security_admin"
+}
+```
+
+**Template with Minimal Fields** (all optional fields omitted):
+```json
+{
+  "id": "tmpl_minimal_001",
+  "name": "Quick Task",
+  "scope": "User",
+  "scopeId": "user_bob_789",
+  "fields": {
+    "title": "TODO: "
+  },
+  "createdAt": "2024-01-15T10:30:00Z",
+  "updatedAt": "2024-01-15T10:30:00Z",
+  "createdBy": "user_bob_789"
+}
+```
+
+**Relative Date Rule Behavior**:
+- `offsetDays: 0` → Due date = application date (today)
+- `offsetDays: 3` → Due date = 3 days from application date
+- `offsetDays: -7` → Due date = 7 days before application date (for retrospective tasks)
+- Omitted `relativeDateRule` → No due date set by template
 
 ### Storage Implementation
 
@@ -371,6 +534,343 @@ interface User {
   active: boolean;
 }
 ```
+
+### Smart Merge Strategy
+
+The template application system uses a smart merge strategy that prioritizes user-entered data over template values. This ensures users never lose work when applying templates.
+
+**Merge Priority Rules**:
+
+1. **Title Field**:
+   - If user has entered a title → Keep user's title (template title ignored)
+   - If title is empty → Fill from template
+   - Rationale: Title is often the first thing users type; overwriting would be disruptive
+
+2. **Description Field**:
+   - If user has entered a description → Append template description with separator
+   - If description is empty → Fill from template
+   - Separator format: `\n\n---\n\n` (visual break between user and template content)
+   - Rationale: Both user and template descriptions may contain valuable content
+
+3. **Labels Field**:
+   - Always merge: Union of user labels and template labels
+   - Remove duplicates (by label ID)
+   - Preserve order: user labels first, then template labels
+   - Rationale: Labels are additive; more labels provide better categorization
+
+4. **Assignee Field**:
+   - If user has selected an assignee → Keep user's assignee (template assignee ignored)
+   - If no assignee selected → Fill from template
+   - Rationale: Assignee is a deliberate choice; overwriting would be confusing
+
+5. **Due Date Field**:
+   - If user has set a due date → Keep user's due date (template date ignored)
+   - If no due date set → Compute from template's relativeDateRule
+   - Rationale: User-specified dates take precedence over template calculations
+
+**Implementation Algorithm**:
+
+```typescript
+function mergeTemplateWithExistingData(
+  template: Template,
+  existingData: Partial<TaskData>,
+  context: ApplicationContext
+): TaskData {
+  const result: Partial<TaskData> = { ...existingData };
+  
+  // Title: preserve if non-empty
+  if (!existingData.title || existingData.title.trim() === '') {
+    result.title = template.fields.title || '';
+  }
+  
+  // Description: append if both exist
+  if (template.fields.description) {
+    if (existingData.description && existingData.description.trim() !== '') {
+      result.description = existingData.description + '\n\n---\n\n' + template.fields.description;
+    } else {
+      result.description = template.fields.description;
+    }
+  }
+  
+  // Labels: union without duplicates
+  if (template.fields.labels) {
+    const existingLabels = existingData.labels || [];
+    const templateLabels = template.fields.labels.filter(
+      labelId => context.availableLabels.some(l => l.id === labelId)
+    );
+    result.labels = [...new Set([...existingLabels, ...templateLabels])];
+  }
+  
+  // Assignee: preserve if set
+  if (!existingData.assignee && template.fields.assignee) {
+    const assigneeExists = context.availableUsers.some(
+      u => u.id === template.fields.assignee && u.active
+    );
+    if (assigneeExists) {
+      result.assignee = template.fields.assignee;
+    }
+  }
+  
+  // Due date: compute if not set
+  if (!existingData.dueDate && template.relativeDateRule) {
+    result.dueDate = RelativeDateComputer.compute(template.relativeDateRule);
+  }
+  
+  return result as TaskData;
+}
+```
+
+**Merge Result Tracking**:
+
+The merge operation returns metadata about what was applied:
+
+```typescript
+interface MergeResult {
+  appliedFields: string[];      // Fields filled from template
+  preservedFields: string[];    // Fields kept from user input
+  skippedFields: Array<{        // Fields not applied due to validation
+    field: string;
+    reason: string;
+  }>;
+  warnings: string[];           // Non-critical issues (e.g., deleted labels)
+}
+```
+
+### Ghost Preview System
+
+The Ghost Preview provides a visual preview of what the task will look like after template application, helping users make informed decisions before committing.
+
+**Preview Trigger**:
+- Activated when user hovers over a template name in the dropdown
+- Debounced by 300ms to avoid flickering during mouse movement
+- Dismissed when mouse leaves template area or user selects a template
+
+**Preview Rendering**:
+
+The preview shows a "skeleton" or "ghost" version of the task form with:
+- Dimmed/translucent styling (opacity: 0.6) to indicate preview state
+- Template values rendered in their respective fields
+- Merge indicators showing which fields will be filled vs. preserved
+- Color coding:
+  - Green highlight: Fields that will be filled from template
+  - Blue highlight: Fields that will be preserved from user input
+  - Yellow highlight: Fields that will be merged (description, labels)
+  - Red highlight: Fields that will be skipped due to validation errors
+
+**Preview Component Structure**:
+
+```typescript
+interface GhostPreviewData {
+  previewTitle: string;
+  previewDescription: string;
+  previewLabels: Array<{ id: string; name: string; color: string }>;
+  previewAssignee: { id: string; name: string } | null;
+  previewDueDate: string | null;
+  
+  fieldStates: {
+    title: 'fill' | 'preserve' | 'merge' | 'skip';
+    description: 'fill' | 'preserve' | 'merge' | 'skip';
+    labels: 'fill' | 'preserve' | 'merge' | 'skip';
+    assignee: 'fill' | 'preserve' | 'merge' | 'skip';
+    dueDate: 'fill' | 'preserve' | 'merge' | 'skip';
+  };
+  
+  validationWarnings: string[];
+}
+
+function generateGhostPreview(
+  template: Template,
+  currentData: Partial<TaskData>,
+  context: ApplicationContext
+): GhostPreviewData {
+  // Simulate merge operation
+  const mergeResult = mergeTemplateWithExistingData(template, currentData, context);
+  
+  // Determine field states
+  const fieldStates = {
+    title: determineFieldState('title', template, currentData),
+    description: determineFieldState('description', template, currentData),
+    labels: determineFieldState('labels', template, currentData),
+    assignee: determineFieldState('assignee', template, currentData),
+    dueDate: determineFieldState('dueDate', template, currentData),
+  };
+  
+  // Validate and collect warnings
+  const validation = ValidationLayer.validate(template, context);
+  
+  return {
+    previewTitle: mergeResult.title,
+    previewDescription: mergeResult.description,
+    previewLabels: resolveLabels(mergeResult.labels, context),
+    previewAssignee: resolveAssignee(mergeResult.assignee, context),
+    previewDueDate: mergeResult.dueDate,
+    fieldStates,
+    validationWarnings: validation.errors.map(e => e.message),
+  };
+}
+```
+
+**Preview UI Layout**:
+
+```
+┌─────────────────────────────────────┐
+│ Template: Bug Report Template       │
+│ ─────────────────────────────────── │
+│ Title: [Bug: ] ← will fill          │
+│ Description: [template text] ← fill │
+│ Labels: [bug, triage] ← will fill   │
+│ Assignee: @john ← will fill         │
+│ Due Date: Dec 17, 2024 ← computed   │
+│                                     │
+│ ⚠ Note: 1 label no longer exists    │
+└─────────────────────────────────────┘
+```
+
+**Performance Considerations**:
+- Preview computation must complete in <50ms to feel instant
+- Cache validation results for templates to avoid repeated checks
+- Use React.memo() to prevent unnecessary re-renders
+- Debounce hover events to reduce computation frequency
+
+### Enhanced Visual Feedback System
+
+The visual feedback system provides clear, non-intrusive indicators when template fields are applied, helping users understand what was automated.
+
+**Highlight Behavior**:
+
+1. **Trigger**: Highlights activate immediately after successful template application
+2. **Duration**: Default 2000ms (configurable per field type)
+3. **Animation Types**:
+   - **Fade**: Smooth opacity transition from highlighted to normal (default)
+   - **Pulse**: Gentle scale animation that draws attention
+   - **Slide**: Subtle slide-in effect for newly filled fields
+
+4. **Color Coding**:
+   - Green (#51cf66): Field filled from template
+   - Blue (#4a9eff): Field preserved from user input (shown in preview only)
+   - Yellow (#ffd43b): Field merged (description, labels)
+
+**Implementation Details**:
+
+```typescript
+interface HighlightConfig {
+  duration: number;           // milliseconds
+  animationType: 'fade' | 'pulse' | 'slide';
+  color: string;              // hex color code
+  intensity: number;          // 0.0 to 1.0 (opacity multiplier)
+}
+
+const defaultHighlightConfigs: Record<string, HighlightConfig> = {
+  title: { duration: 2000, animationType: 'fade', color: '#51cf66', intensity: 0.3 },
+  description: { duration: 2500, animationType: 'fade', color: '#51cf66', intensity: 0.3 },
+  labels: { duration: 2000, animationType: 'pulse', color: '#51cf66', intensity: 0.4 },
+  assignee: { duration: 2000, animationType: 'fade', color: '#51cf66', intensity: 0.3 },
+  dueDate: { duration: 2000, animationType: 'fade', color: '#51cf66', intensity: 0.3 },
+};
+
+class FieldHighlighter {
+  private activeHighlights: Map<string, NodeJS.Timeout> = new Map();
+  
+  /**
+   * Apply highlight animation to a field
+   * @param fieldName - Name of the field to highlight
+   * @param config - Highlight configuration (uses default if not provided)
+   */
+  highlight(fieldName: string, config?: Partial<HighlightConfig>): void {
+    // Clear existing highlight if present
+    this.clearHighlight(fieldName);
+    
+    const finalConfig = { ...defaultHighlightConfigs[fieldName], ...config };
+    const element = document.querySelector(`[data-field="${fieldName}"]`);
+    
+    if (!element) return;
+    
+    // Apply highlight class with animation
+    element.classList.add('field-highlighted');
+    element.style.setProperty('--highlight-color', finalConfig.color);
+    element.style.setProperty('--highlight-intensity', finalConfig.intensity.toString());
+    element.style.setProperty('--animation-type', finalConfig.animationType);
+    
+    // Schedule removal
+    const timeout = setTimeout(() => {
+      element.classList.remove('field-highlighted');
+      this.activeHighlights.delete(fieldName);
+    }, finalConfig.duration);
+    
+    this.activeHighlights.set(fieldName, timeout);
+  }
+  
+  /**
+   * Clear highlight from a field immediately
+   */
+  clearHighlight(fieldName: string): void {
+    const timeout = this.activeHighlights.get(fieldName);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.activeHighlights.delete(fieldName);
+    }
+    
+    const element = document.querySelector(`[data-field="${fieldName}"]`);
+    if (element) {
+      element.classList.remove('field-highlighted');
+    }
+  }
+  
+  /**
+   * Clear all active highlights
+   */
+  clearAll(): void {
+    for (const fieldName of this.activeHighlights.keys()) {
+      this.clearHighlight(fieldName);
+    }
+  }
+}
+```
+
+**CSS Animation Definitions**:
+
+```css
+.field-highlighted {
+  position: relative;
+  transition: background-color 0.3s ease-in-out;
+}
+
+.field-highlighted[style*="--animation-type: fade"] {
+  background-color: var(--highlight-color);
+  opacity: var(--highlight-intensity);
+  animation: fadeOut var(--highlight-duration, 2000ms) ease-in-out forwards;
+}
+
+.field-highlighted[style*="--animation-type: pulse"] {
+  animation: pulse 0.6s ease-in-out 3;
+}
+
+.field-highlighted[style*="--animation-type: slide"] {
+  animation: slideIn 0.4s ease-out;
+}
+
+@keyframes fadeOut {
+  0% { opacity: var(--highlight-intensity); }
+  70% { opacity: var(--highlight-intensity); }
+  100% { opacity: 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+@keyframes slideIn {
+  0% { transform: translateX(-10px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+```
+
+**Accessibility Considerations**:
+- Respect `prefers-reduced-motion` media query (disable animations if set)
+- Provide screen reader announcements for applied fields
+- Ensure sufficient color contrast for highlights
+- Don't rely solely on color to convey information (use icons/text as well)
 
 
 ## Correctness Properties
@@ -484,6 +984,42 @@ interface User {
 *For any* invalid JSON string provided to the parse function, the function must return an error result with a descriptive error message rather than throwing an exception.
 
 **Validates: Requirements 12.2**
+
+### Property 19: Ghost Preview Merge Simulation Accuracy
+
+*For any* template and existing task data, the ghost preview's simulated merge result must exactly match the actual merge result that would occur if the template were applied.
+
+**Validates: Ghost Preview System**
+
+### Property 20: Field Highlight Animation Timing
+
+*For any* template application that fills one or more fields, the field highlighter must display visual feedback for exactly the configured duration (default 2000ms) before returning to normal state.
+
+**Validates: Enhanced Visual Feedback**
+
+### Property 21: Relative Date Offset Storage
+
+*For any* template with a relative date rule, the stored offsetDays value must be an integer, and computing the due date at any future application time T must produce T + offsetDays.
+
+**Validates: Relative Date Rules Enhancement**
+
+### Property 22: Smart Merge Never Overwrites User Data
+
+*For any* template application where the user has entered data in a field (title, assignee, or due date), the merge operation must preserve the user's value and not overwrite it with the template value.
+
+**Validates: Smart Merge Strategy**
+
+### Property 23: Description Merge Preserves Both Contents
+
+*For any* template with a description and existing task data with a non-empty description, the merged description must contain both the user's original description and the template description, separated by a clear delimiter.
+
+**Validates: Smart Merge Strategy**
+
+### Property 24: Label Merge Produces Union Without Duplicates
+
+*For any* template with labels and existing task data with labels, the merged label set must contain all unique labels from both sources with no duplicates (by label ID).
+
+**Validates: Smart Merge Strategy**
 
 ## Error Handling
 
@@ -612,19 +1148,46 @@ test('template serialization round-trip preserves data', () => {
    - Apply template to task with pre-filled description
    - Apply template to task with existing labels
    - Apply template to task with existing assignee
+   - Apply template to task with existing due date
 
-2. **Templates with Null Optional Fields**
+2. **Smart Merge Strategy**
+   - Verify title preservation when user has entered text
+   - Verify description append with correct separator
+   - Verify label union without duplicates
+   - Verify assignee preservation when already set
+   - Verify due date preservation when already set
+
+3. **Ghost Preview Accuracy**
+   - Preview matches actual merge result for all field combinations
+   - Preview updates within 50ms of hover
+   - Preview dismisses correctly on mouse leave
+   - Preview shows validation warnings for invalid references
+
+4. **Relative Date Calculations**
+   - Positive offset produces future date
+   - Negative offset produces past date
+   - Zero offset produces current date
+   - Large offsets (>365 days) compute correctly
+   - Date format is valid ISO 8601
+
+5. **Templates with Null Optional Fields**
    - Template with no description
    - Template with no labels
    - Template with no assignee
    - Template with no relative date rule
 
-3. **Permission-Based Scenarios**
+6. **Permission-Based Scenarios**
    - User accessing templates in projects they don't belong to
    - User creating workspace templates without permission
    - User editing templates they didn't create
 
-4. **Edge Cases**
+7. **Visual Feedback**
+   - Field highlights appear immediately after template application
+   - Highlights persist for configured duration
+   - Multiple fields can be highlighted simultaneously
+   - Highlight animations don't interfere with user input
+
+8. **Edge Cases**
    - Empty template (no fields set)
    - Template with all fields set to empty strings
    - Template with very long text fields (>10KB)
@@ -653,8 +1216,9 @@ test('template serialization round-trip preserves data', () => {
 
 **UI Component Tests**:
 - TemplateSelector: 8+ test cases (rendering, selection, filtering)
+- GhostPreview: 10+ test cases (hover trigger, merge simulation, validation display, dismiss behavior)
 - TemplateManager: 12+ test cases (CRUD operations, search, filtering)
-- FieldHighlighter: 4+ test cases (highlight timing, multiple fields)
+- FieldHighlighter: 6+ test cases (highlight timing, animation types, multiple fields)
 
 ### Integration Tests
 
@@ -664,11 +1228,16 @@ test('template serialization round-trip preserves data', () => {
 3. Edit template → Apply to existing task → Verify updates
 4. Delete template → Verify removed from selector
 5. Change scope → Verify visibility changes
+6. Hover template → View ghost preview → Apply → Verify match
+7. Enter task data → Hover template → Verify merge preview → Apply → Verify preservation
+8. Apply template with relative date → Verify computed date is correct
 
 **Performance Tests**:
 - Template application completes in <100ms (measured with performance.now())
 - Template list loading with 100+ templates completes in <200ms
 - Search across 100+ templates completes in <50ms
+- Ghost preview computation completes in <50ms
+- Field highlight animations run at 60fps without jank
 
 ### Test Data Generators
 
@@ -707,6 +1276,20 @@ const contextArbitrary = () => fc.record({
     canCreateWorkspaceTemplates: fc.boolean(),
     canCreateProjectTemplates: fc.boolean(),
   }),
+});
+
+// Generate partial task data (for merge testing)
+const partialTaskDataArbitrary = () => fc.record({
+  title: fc.option(fc.string({ maxLength: 200 })),
+  description: fc.option(fc.string({ maxLength: 2000 })),
+  labels: fc.option(fc.array(fc.string(), { maxLength: 10 })),
+  assignee: fc.option(fc.string()),
+  dueDate: fc.option(fc.date().map(d => d.toISOString())),
+});
+
+// Generate relative date rules with various offsets
+const relativeDateRuleArbitrary = () => fc.record({
+  offsetDays: fc.integer({ min: -365, max: 365 }),
 });
 ```
 
