@@ -50,6 +50,15 @@ WAIT_FOR_CONFIRMATION=true
 LOG_LEVEL=info
 # Optional: pretty console output for local development only
 # LOG_FORMAT=pretty
+
+# Optional: folder/file for keeper execution idempotency state
+# Default file: ./data/execution_locks.json
+# KEEPER_STATE_DIR=./data
+# IDEMPOTENCY_STATE_FILE=./data/execution_locks.json
+
+# Optional: lock expiration controls (milliseconds)
+# EXECUTION_LOCK_TTL_MS=120000
+# EXECUTION_COMPLETED_MARKER_TTL_MS=30000
 ```
 
 ### Explanation of Variables:
@@ -65,6 +74,9 @@ LOG_LEVEL=info
 - **`WAIT_FOR_CONFIRMATION`**: Whether to wait for transaction confirmation after submitting. Set to 'false' for fire-and-forget mode.
 - **`LOG_LEVEL`**: Minimum log severity to emit (`trace`, `debug`, `info`, `warn`, `error`, `fatal`).
 - **`LOG_FORMAT`**: Optional log renderer. Leave unset for JSON logs; set to `pretty` for local human-readable output.
+- **`KEEPER_STATE_DIR` / `IDEMPOTENCY_STATE_FILE`**: Location of persisted execution idempotency locks used to prevent duplicate submissions.
+- **`EXECUTION_LOCK_TTL_MS`**: How long an in-progress execution lock is considered valid before stale recovery allows new work.
+- **`EXECUTION_COMPLETED_MARKER_TTL_MS`**: Short-lived post-success marker to reduce accidental immediate duplicate submissions.
 
 ## Setup Instructions
 

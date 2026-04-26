@@ -42,6 +42,85 @@ async function pollTransaction(server, txHash) {
   return { status: 'TIMEOUT', feePaid: 0 };
 }
 
+function normalizeSubmissionError(error, fallbackCode) {
+  if (!error) {
+    return Object.assign(new Error('Unknown submission failure'), { code: fallbackCode || 'UNKNOWN' });
+  }
+
+  if (error.code) {
+    return error;
+  }
+
+  const message = error.message || String(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes('duplicate') || lower.includes('already in ledger')) {
+    return Object.assign(new Error(message), { code: 'DUPLICATE_TRANSACTION' });
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return Object.assign(new Error(message), { code: 'TIMEOUT_ERROR' });
+  }
+  if (lower.includes('network') || lower.includes('fetch failed') || lower.includes('socket hang up')) {
+    return Object.assign(new Error(message), { code: 'NETWORK_ERROR' });
+  }
+
+  return Object.assign(new Error(message), { code: fallbackCode || 'UNKNOWN' });
+}
+
+async function executeTaskOnce(taskId, { server, keypair, account, contractId, networkPassphrase }) {
+  const contract = new Contract(contractId);
+  const taskIdScVal = xdr.ScVal.scvU64(xdr.Uint64.fromString(taskId.toString()));
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: networkPassphrase || Networks.FUTURENET,
+  })
+    .addOperation(contract.call('execute', taskIdScVal))
+    .setTimeout(30)
+    .build();
+
+  let simResult;
+  try {
+    simResult = await server.simulateTransaction(tx);
+  } catch (error) {
+    throw normalizeSubmissionError(error, 'NETWORK_ERROR');
+  }
+
+  if (SorobanRpc.Api.isSimulationError(simResult)) {
+    throw Object.assign(new Error(`Simulation failed: ${simResult.error}`), { code: 'SIMULATION_FAILED' });
+  }
+
+  const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+  preparedTx.sign(keypair);
+
+  let sendResult;
+  try {
+    sendResult = await server.sendTransaction(preparedTx);
+  } catch (error) {
+    throw normalizeSubmissionError(error, 'NETWORK_ERROR');
+  }
+
+  const txHash = sendResult.hash || null;
+  logger.info('Transaction submitted', { taskId, txHash, status: sendResult.status });
+
+  if (sendResult.status === 'ERROR') {
+    const sendError = String(sendResult.errorResult || sendResult.error || 'Transaction submission error');
+    throw normalizeSubmissionError(Object.assign(new Error(`Send failed: ${sendError}`), {
+      code: /duplicate|already in ledger/i.test(sendError) ? 'DUPLICATE_TRANSACTION' : 'INVALID_TRANSACTION',
+    }));
+  }
+
+  const { status, feePaid } = await pollTransaction(server, sendResult.hash);
+  if (status === 'FAILED') {
+    throw Object.assign(new Error('Transaction reached FAILED status'), { code: 'TX_FAILED' });
+  }
+  if (status === 'TIMEOUT') {
+    throw Object.assign(new Error('Transaction polling timed out'), { code: 'TIMEOUT_ERROR' });
+  }
+
+  return { taskId, txHash, status, feePaid, error: null };
+}
+
 /**
  * Build, simulate, sign, submit, and poll an execute(task_id) Soroban transaction.
  *
@@ -59,45 +138,16 @@ async function executeTask(taskId, { server, keypair, account, contractId, netwo
   const result = { taskId, txHash: null, status: 'PENDING', feePaid: 0, error: null };
 
   try {
-    const contract = new Contract(contractId);
-    const taskIdScVal = xdr.ScVal.scvU64(xdr.Uint64.fromString(taskId.toString()));
-
-    // 1. Build transaction
-    const tx = new TransactionBuilder(account, {
-      fee: BASE_FEE,
-      networkPassphrase: networkPassphrase || Networks.FUTURENET,
-    })
-      .addOperation(contract.call('execute', taskIdScVal))
-      .setTimeout(30)
-      .build();
-
-    // 2. Simulate to get footprint + resource fees
-    const simResult = await server.simulateTransaction(tx);
-
-    if (SorobanRpc.Api.isSimulationError(simResult)) {
-      throw Object.assign(new Error(`Simulation failed: ${simResult.error}`), { code: 'INVALID_ARGS' });
-    }
-
-    // 3. Apply simulation result (sets footprint and resource fee)
-    const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
-
-    // 4. Sign
-    preparedTx.sign(keypair);
-
-    // 5. Submit
-    const sendResult = await server.sendTransaction(preparedTx);
-    result.txHash = sendResult.hash;
-
-    logger.info('Transaction submitted', { taskId, txHash: sendResult.hash, status: sendResult.status });
-
-    if (sendResult.status === 'ERROR') {
-      throw Object.assign(new Error(`Send failed: ${sendResult.errorResult}`), { code: 'INVALID_TRANSACTION' });
-    }
-
-    // 6. Poll for final status
-    const { status, feePaid } = await pollTransaction(server, sendResult.hash);
-    result.status = status;
-    result.feePaid = feePaid;
+    const executionResult = await executeTaskOnce(taskId, {
+      server,
+      keypair,
+      account,
+      contractId,
+      networkPassphrase,
+    });
+    result.txHash = executionResult.txHash;
+    result.status = executionResult.status;
+    result.feePaid = executionResult.feePaid;
 
     logger.info('Transaction finalised', { taskId, txHash: result.txHash, status, feePaid });
   } catch (err) {
@@ -107,6 +157,79 @@ async function executeTask(taskId, { server, keypair, account, contractId, netwo
   }
 
   return result;
+}
+
+/**
+ * Execute a task with bounded retries and error classification.
+ *
+ * @param {number|bigint} taskId
+ * @param {object} deps
+ * @param {object} options
+ * @returns {Promise<object>}
+ */
+async function executeTaskWithRetry(taskId, deps, options = {}) {
+  const executionLogger = options.logger || logger;
+  const attemptId = options.attemptId || null;
+
+  const retryResult = await withRetry(
+    async () => {
+      const freshAccount = deps.account || await deps.server.getAccount(deps.keypair.publicKey());
+      return executeTaskOnce(taskId, {
+        ...deps,
+        account: freshAccount,
+      });
+    },
+    {
+      maxRetries: options.maxRetries ?? parseInt(process.env.MAX_RETRIES || '3', 10),
+      baseDelayMs: options.baseDelayMs ?? parseInt(process.env.RETRY_BASE_DELAY_MS || '1000', 10),
+      maxDelayMs: options.maxDelayMs ?? parseInt(process.env.MAX_RETRY_DELAY_MS || '30000', 10),
+      retryUnknown: options.retryUnknown ?? false,
+      onRetry: (error, attempt, delay, context) => {
+        executionLogger.warn('Retrying task submission', {
+          taskId,
+          attemptId,
+          attempt,
+          delay,
+          classification: context.classification,
+          code: context.code,
+          error: context.message,
+        });
+        if (typeof options.onRetry === 'function') {
+          options.onRetry(error, attempt, delay, context);
+        }
+      },
+      onMaxRetries: (error, attempts, context) => {
+        executionLogger.error('Task submission retries exhausted', {
+          taskId,
+          attemptId,
+          attempts,
+          classification: context.classification,
+          code: context.code,
+          error: context.message,
+        });
+        if (typeof options.onMaxRetries === 'function') {
+          options.onMaxRetries(error, attempts, context);
+        }
+      },
+      onDuplicate: (context) => {
+        executionLogger.info('Duplicate transaction acknowledged', {
+          taskId,
+          attemptId,
+          classification: context.classification,
+          code: context.code,
+        });
+        if (typeof options.onDuplicate === 'function') {
+          options.onDuplicate(context);
+        }
+      },
+    },
+  );
+
+  return {
+    ...retryResult,
+    taskId,
+    attemptId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,4 +282,9 @@ function createExecutor({ logger: customLogger, config } = {}) {
   };
 }
 
-module.exports = { executeTask, createExecutor, ErrorClassification };
+module.exports = {
+  executeTask,
+  executeTaskWithRetry,
+  createExecutor,
+  ErrorClassification,
+};

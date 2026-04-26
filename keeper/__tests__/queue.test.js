@@ -5,6 +5,10 @@
  */
 
 const { ExecutionQueue } = require('../src/queue');
+const { ExecutionIdempotencyGuard } = require('../src/idempotency');
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
 
 describe('ExecutionQueue', () => {
   let queue;
@@ -274,6 +278,47 @@ describe('ExecutionQueue', () => {
       await metricsQueue.enqueue([1], executorFn);
 
       expect(mockMetrics.record).toHaveBeenCalledWith('lastCycleDurationMs', expect.any(Number));
+    });
+  });
+
+  describe('idempotency integration', () => {
+    function createStateFile(name) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keeper-queue-idem-'));
+      return path.join(dir, `${name}.json`);
+    }
+
+    it('should skip execution when task lock is already present', async () => {
+      const stateFile = createStateFile('skip-locked');
+      const guard = new ExecutionIdempotencyGuard({ stateFile, lockTtlMs: 60000 });
+      guard.acquire(7);
+
+      const queueWithIdempotency = new ExecutionQueue(1, null, { idempotencyGuard: guard });
+      const skippedSpy = jest.fn();
+      queueWithIdempotency.on('task:skipped', skippedSpy);
+
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+      await queueWithIdempotency.enqueue([7], executorFn);
+
+      expect(executorFn).not.toHaveBeenCalled();
+      expect(skippedSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should pass attemptId context to executor for retries within same attempt', async () => {
+      const stateFile = createStateFile('attempt-context');
+      const guard = new ExecutionIdempotencyGuard({ stateFile, lockTtlMs: 60000 });
+      const queueWithIdempotency = new ExecutionQueue(1, null, { idempotencyGuard: guard });
+
+      const attempts = [];
+      const executorFn = jest.fn(async (_taskId, context) => {
+        attempts.push(context?.attemptId || null);
+      });
+
+      await queueWithIdempotency.enqueue([21], executorFn);
+
+      expect(executorFn).toHaveBeenCalledTimes(1);
+      expect(attempts[0]).toBeTruthy();
+      expect(guard.getLock(21)).toBeTruthy();
+      expect(guard.getLock(21).attemptId).toBe(attempts[0]);
     });
   });
 });

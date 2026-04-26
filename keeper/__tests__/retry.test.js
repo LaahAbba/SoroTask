@@ -7,6 +7,8 @@ const {
   retry,
   isRetryableError,
   isDuplicateTransactionError,
+  classifyError,
+  extractErrorCode,
   ErrorClassification,
 } = require('../src/retry.js');
 
@@ -149,6 +151,35 @@ describe('withRetry', () => {
 
       expect(fn).toHaveBeenCalledTimes(1);
     });
+
+    it('should classify unrecognized errors as unknown and stop', async () => {
+      const fn = jest.fn().mockRejectedValue(new Error('some completely new failure signature'));
+
+      await expect(withRetry(fn, { maxRetries: 3, baseDelayMs: 10 }))
+        .rejects.toMatchObject({
+          success: false,
+          classification: ErrorClassification.UNKNOWN,
+          attempts: 1,
+        });
+
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry unknown errors when retryUnknown is enabled', async () => {
+      const fn = jest.fn()
+        .mockRejectedValueOnce(new Error('novel transient edge case'))
+        .mockResolvedValueOnce('success');
+
+      const result = await withRetry(fn, {
+        maxRetries: 2,
+        baseDelayMs: 10,
+        retryUnknown: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.attempts).toBe(2);
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('max retries exceeded', () => {
@@ -178,7 +209,7 @@ describe('withRetry', () => {
       })).rejects.toBeDefined();
 
       expect(onMaxRetries).toHaveBeenCalledTimes(1);
-      expect(onMaxRetries).toHaveBeenCalledWith(error, 3);
+      expect(onMaxRetries).toHaveBeenCalledWith(error, 3, expect.any(Object));
     });
   });
 
@@ -197,8 +228,8 @@ describe('withRetry', () => {
       });
 
       expect(onRetry).toHaveBeenCalledTimes(2);
-      expect(onRetry).toHaveBeenNthCalledWith(1, expect.any(Error), 1, expect.any(Number));
-      expect(onRetry).toHaveBeenNthCalledWith(2, expect.any(Error), 2, expect.any(Number));
+      expect(onRetry).toHaveBeenNthCalledWith(1, expect.any(Error), 1, expect.any(Number), expect.any(Object));
+      expect(onRetry).toHaveBeenNthCalledWith(2, expect.any(Error), 2, expect.any(Number), expect.any(Object));
     });
   });
 
@@ -381,5 +412,42 @@ describe('ErrorClassification', () => {
     expect(ErrorClassification.RETRYABLE).toBe('retryable');
     expect(ErrorClassification.NON_RETRYABLE).toBe('non_retryable');
     expect(ErrorClassification.DUPLICATE).toBe('duplicate');
+    expect(ErrorClassification.UNKNOWN).toBe('unknown');
+  });
+});
+
+describe('extractErrorCode', () => {
+  it('should extract from errorCode and status fields', () => {
+    expect(extractErrorCode({ errorCode: 'NETWORK_ERROR' })).toBe('NETWORK_ERROR');
+    expect(extractErrorCode({ status: 'TIMEOUT' })).toBe('TIMEOUT');
+  });
+
+  it('should extract from resultXdr patterns', () => {
+    const fakeXdr = {
+      toString: () => '...txBadAuth...'
+    };
+
+    expect(extractErrorCode({ resultXdr: fakeXdr })).toBe('TXBADAUTH');
+  });
+
+  it('should return null for empty or unmatched payloads', () => {
+    expect(extractErrorCode(null)).toBeNull();
+    expect(extractErrorCode({})).toBeNull();
+    expect(extractErrorCode({ resultXdr: { toString: () => 'no known pattern' } })).toBeNull();
+  });
+});
+
+describe('classifyError', () => {
+  it('should classify null as unknown', () => {
+    expect(classifyError(null)).toBe(ErrorClassification.UNKNOWN);
+  });
+
+  it('should classify retryable from status and message fallback', () => {
+    expect(classifyError({ status: 'NETWORK_ERROR' })).toBe(ErrorClassification.RETRYABLE);
+    expect(classifyError({ message: 'temporarily unavailable upstream service' })).toBe(ErrorClassification.RETRYABLE);
+  });
+
+  it('should classify non-retryable from errorCode', () => {
+    expect(classifyError({ errorCode: 'VALIDATION_ERROR' })).toBe(ErrorClassification.NON_RETRYABLE);
   });
 });

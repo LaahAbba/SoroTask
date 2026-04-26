@@ -25,5 +25,5 @@ module.exports = {
       statements: 80
     }
   },
-  testMatch: ["**/__tests__/**/*.js", "**/*.test.js", "**/*.spec.js"]
+  testMatch: ["**/?(*.)+(test|spec).js"]
 };

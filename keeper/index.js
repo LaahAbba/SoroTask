@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Keypair, rpc, Contract, TransactionBuilder, BASE_FEE, Networks, xdr } = require('@stellar/stellar-sdk');
+const { rpc, Networks } = require('@stellar/stellar-sdk');
 const { Server } = rpc;
 
 const { loadConfig } = require('./src/config');
@@ -9,6 +9,8 @@ const TaskPoller = require('./src/poller');
 const TaskRegistry = require('./src/registry');
 const { createLogger } = require('./src/logger');
 const { dryRunTask } = require('./src/dryRun');
+const { executeTaskWithRetry } = require('./src/executor');
+const { ExecutionIdempotencyGuard } = require('./src/idempotency');
 
 // Create root logger for the main module
 const logger = createLogger('keeper');
@@ -43,8 +45,12 @@ async function main() {
         process.exit(1);
     }
 
-    const { keypair, accountResponse } = keeperData;
+    const { keypair } = keeperData;
     const server = new Server(config.rpcUrl);
+
+    const idempotencyGuard = new ExecutionIdempotencyGuard({
+        logger: createLogger('idempotency')
+    });
 
     // Initialize polling engine with logger
     const poller = new TaskPoller(server, config.contractId, {
@@ -54,17 +60,18 @@ async function main() {
     logger.info('Poller initialized', { contractId: config.contractId });
 
     // Initialize execution queue
-    const queue = new ExecutionQueue();
+    const queue = new ExecutionQueue(undefined, undefined, { idempotencyGuard });
     const queueLogger = createLogger('queue');
 
-    queue.on('task:started', (taskId) => queueLogger.info('Started execution', { taskId }));
+    queue.on('task:started', (taskId, context) => queueLogger.info('Started execution', { taskId, attemptId: context?.attemptId || null }));
     queue.on('task:success', (taskId) => queueLogger.info('Task executed successfully', { taskId }));
     queue.on('task:failed', (taskId, err) => queueLogger.error('Task failed', { taskId, error: err.message }));
+    queue.on('task:skipped', (taskId, context) => queueLogger.info('Skipped duplicate execution attempt', { taskId, reason: context?.reason, attemptId: context?.attemptId || null }));
     queue.on('cycle:complete', (stats) => queueLogger.info('Cycle complete', stats));
 
     // Task executor function - calls contract.execute(keeper, task_id)
     // In dry-run mode, simulates the transaction without submitting it.
-    const executeTask = async (taskId) => {
+    const executeTask = async (taskId, context = {}) => {
         const account = await server.getAccount(keypair.publicKey());
         const deps = {
             server,
@@ -81,50 +88,33 @@ async function main() {
         }
 
         try {
-            // Build the execute transaction
-            const contract = new Contract(config.contractId);
+            const retryResult = await executeTaskWithRetry(taskId, deps, {
+                attemptId: context.attemptId,
+                logger,
+                onRetry: (_error, _attempt, _delay, retryContext) => {
+                    idempotencyGuard.touchRetry(taskId, {
+                        lastError: retryContext?.message || null,
+                    });
+                },
+            });
 
-            const operation = contract.call(
-                'execute',
-                keypair.publicKey(), // keeper address
-                taskId // task_id
-            );
-
-            const transaction = new TransactionBuilder(account, {
-                fee: BASE_FEE,
-                networkPassphrase: config.networkPassphrase || Networks.FUTURENET
-            })
-                .addOperation(operation)
-                .setTimeout(30)
-                .build();
-
-            transaction.sign(keypair);
-
-            // Submit the transaction
-            const response = await server.sendTransaction(transaction);
-            logger.info('Task transaction submitted', { taskId, hash: response.hash });
-
-            // Wait for confirmation (optional, can be made configurable)
-            if (process.env.WAIT_FOR_CONFIRMATION !== 'false') {
-                let status = await server.getTransaction(response.hash);
-                let attempts = 0;
-                const maxAttempts = 10;
-
-                while (status.status === 'PENDING' && attempts < maxAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    status = await server.getTransaction(response.hash);
-                    attempts++;
-                }
-
-                if (status.status === 'SUCCESS') {
-                    logger.info('Task executed successfully', { taskId });
-                } else {
-                    throw new Error(`Transaction failed with status: ${status.status}`);
-                }
-            }
+            logger.info('Task execution completed', {
+                taskId,
+                attemptId: context.attemptId || null,
+                retries: retryResult.retries,
+                attempts: retryResult.attempts,
+                duplicate: Boolean(retryResult.duplicate),
+                txHash: retryResult.result?.txHash || null,
+            });
 
         } catch (error) {
-            logger.error('Failed to execute task', { taskId, error: error.message });
+            logger.error('Failed to execute task', {
+                taskId,
+                attemptId: context.attemptId || null,
+                error: error.error?.message || error.message || String(error),
+                classification: error.classification || null,
+                context: error.context || null,
+            });
             throw error;
         }
     };
@@ -155,7 +145,12 @@ async function main() {
             const dueTaskIds = await poller.pollDueTasks(taskIds);
 
             if (dueTaskIds.length > 0) {
+                const lockSnapshot = idempotencyGuard.getSnapshot();
                 logger.info('Found due tasks, enqueueing for execution', { dueCount: dueTaskIds.length });
+                logger.info('Execution idempotency state', {
+                    stateFile: lockSnapshot.stateFile,
+                    activeLocks: lockSnapshot.lockCount,
+                });
                 await queue.enqueue(dueTaskIds, executeTask);
             } else {
                 logger.info('No tasks due for execution');
