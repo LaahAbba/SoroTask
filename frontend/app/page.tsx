@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export default function Home() {
   return (
@@ -19,43 +19,48 @@ export default function Home() {
       <main className="container mx-auto px-6 py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
           {/* Create Task Section */}
-          <section className="space-y-6">
-            <h2 className="text-2xl font-bold">Create Automation Task</h2>
-            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Target Contract Address</label>
-                <input type="text" placeholder="C..." className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
-                <input type="text" placeholder="harvest_yield" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+          <ErrorBoundary section="create-task">
+            <section className="space-y-6">
+              <h2 className="text-2xl font-bold">Create Automation Task</h2>
+              <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
                 <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
-                  <input type="number" placeholder="3600" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  <label className="block text-sm font-medium text-neutral-400 mb-1">Target Contract Address</label>
+                  <input type="text" placeholder="C..." className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
-                  <input type="number" placeholder="10" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
+                  <input type="text" placeholder="harvest_yield" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
+                    <input type="number" placeholder="3600" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
+                    <input type="number" placeholder="10" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  </div>
+                </div>
+                <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20">
+                  Register Task
+                </button>
               </div>
-              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20">
-                Register Task
-              </button>
-            </div>
-          </section>
+            </section>
+          </ErrorBoundary>
 
           {/* Your Tasks Section */}
-          <section className="space-y-6">
-            <h2 className="text-2xl font-bold">Your Tasks</h2>
-            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 min-h-[300px] flex flex-col items-center justify-center text-neutral-500 shadow-xl">
-              <p>No tasks registered yet.</p>
-            </div>
-          </section>
+          <ErrorBoundary section="task-list">
+            <section className="space-y-6">
+              <h2 className="text-2xl font-bold">Your Tasks</h2>
+              <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 min-h-[300px] flex flex-col items-center justify-center text-neutral-500 shadow-xl">
+                <p>No tasks registered yet.</p>
+              </div>
+            </section>
+          </ErrorBoundary>
         </div>
 
         {/* Execution Logs */}
+        <ErrorBoundary section="execution-logs">
         <section className="mt-16 space-y-6">
           <h2 className="text-2xl font-bold">Execution Logs</h2>
           <div className="overflow-hidden rounded-xl border border-neutral-700/50 shadow-xl">
@@ -86,6 +91,7 @@ export default function Home() {
             </table>
           </div>
         </section>
+        </ErrorBoundary>
       </main>
     </div>
   );
