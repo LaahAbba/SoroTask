@@ -3,6 +3,9 @@ import '@testing-library/jest-dom'
 // Mock environment variables for tests
 process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3000'
 
+// jsdom does not implement window.scrollTo — silence the "not implemented" error
+window.scrollTo = jest.fn()
+
 // Mock Next.js router
 jest.mock('next/router', () => ({
   useRouter() {

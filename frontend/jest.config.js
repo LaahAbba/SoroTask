@@ -10,11 +10,11 @@ const createJestConfig = async () => {
     testEnvironment: 'jsdom',
     setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
     collectCoverageFrom: [
-      'src/**/*.{js,jsx,ts,tsx}',
-      '!src/**/*.d.ts',
-      '!src/**/*.stories.{js,jsx,ts,tsx}',
-      '!src/**/__tests__/**',
-      '!src/**/__mocks__/**',
+      'components/**/*.{js,jsx,ts,tsx}',
+      'hooks/**/*.{js,jsx,ts,tsx}',
+      '!**/*.d.ts',
+      '!**/__tests__/**',
+      '!**/__mocks__/**',
     ],
     coveragePathIgnorePatterns: [
       '/node_modules/',
@@ -29,11 +29,13 @@ const createJestConfig = async () => {
       },
     },
     testMatch: [
-      '<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}',
-      '<rootDir>/src/**/*.{spec,test}.{js,jsx,ts,tsx}',
+      '<rootDir>/components/**/__tests__/**/*.{js,jsx,ts,tsx}',
+      '<rootDir>/components/**/*.{spec,test}.{js,jsx,ts,tsx}',
+      '<rootDir>/hooks/**/__tests__/**/*.{js,jsx,ts,tsx}',
+      '<rootDir>/hooks/**/*.{spec,test}.{js,jsx,ts,tsx}',
     ],
     moduleNameMapper: {
-      '^@/(.*)$': '<rootDir>/src/$1',
+      '^@/(.*)$': '<rootDir>/$1',
     },
   })
 }
