@@ -18,6 +18,7 @@ class Metrics {
     this.gauges = {
       avgFeePaidXlm: 0,
       lastCycleDurationMs: 0,
+      rpcCircuitState: 0, // 0 = CLOSED, 1 = HALF_OPEN, 2 = OPEN
     };
 
     this.feeSamples = [];
@@ -43,6 +44,8 @@ class Metrics {
       this.gauges.avgFeePaidXlm =
         this.feeSamples.reduce((sum, v) => sum + v, 0) /
         this.feeSamples.length;
+    } else if (key === 'rpcCircuitState') {
+      this.gauges.rpcCircuitState = value;
     } else if (key in this.gauges) {
       this.gauges[key] = value;
     }
@@ -76,6 +79,7 @@ class Metrics {
       uptime: uptimeSeconds,
       lastPollAt: this.lastPollAt ? this.lastPollAt.toISOString() : null,
       rpcConnected: this.rpcConnected,
+      rpcCircuitState: this.gauges.rpcCircuitState === 2 ? 'OPEN' : (this.gauges.rpcCircuitState === 1 ? 'HALF_OPEN' : 'CLOSED'),
     };
   }
 
@@ -87,6 +91,7 @@ class Metrics {
     this.gauges = {
       avgFeePaidXlm: 0,
       lastCycleDurationMs: 0,
+      rpcCircuitState: 0,
     };
     this.feeSamples = [];
   }
@@ -363,6 +368,8 @@ class MetricsServer {
       this.promAvgFee.set(this.metrics.gauges.avgFeePaidXlm);
     } else if (key === 'lastCycleDurationMs') {
       this.promCycleDuration.set(value);
+    } else if (key === 'rpcCircuitState') {
+      this.promRpcCircuitState.set(value);
     }
   }
 
