@@ -1,6 +1,85 @@
+'use client';
+
 import Image from "next/image";
+import { useState } from "react";
+import Calendar from "@/components/Calendar";
+import TaskDetail from "@/components/TaskDetail";
+import { Task } from "@/types/task";
+import { addDays } from "@/lib/dateUtils";
+
+// Mock data generator
+function generateMockTasks(): Task[] {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  return [
+    {
+      id: "task-001",
+      contractAddress: "CAAA...",
+      functionName: "harvest_yield",
+      interval: 3600,
+      gasBalance: 10,
+      createdAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+      deadline: addDays(today, 5),
+      nextExecutionTime: addDays(today, 1),
+      status: "active",
+      description: "Harvest yield from liquidity pool",
+      timezone: "America/New_York",
+    },
+    {
+      id: "task-002",
+      contractAddress: "CBBB...",
+      functionName: "rebalance_portfolio",
+      interval: 86400,
+      gasBalance: 15,
+      createdAt: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
+      deadline: addDays(today, 3),
+      nextExecutionTime: addDays(today, 2),
+      status: "active",
+      description: "Rebalance investment portfolio",
+      timezone: "America/New_York",
+    },
+    {
+      id: "task-003",
+      contractAddress: "CCCC...",
+      functionName: "claim_rewards",
+      interval: 604800,
+      gasBalance: 8,
+      createdAt: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
+      deadline: addDays(today, 3),
+      status: "pending",
+      timezone: "America/New_York",
+    },
+    {
+      id: "task-004",
+      contractAddress: "CDDD...",
+      functionName: "stake_tokens",
+      interval: 3600,
+      gasBalance: 12,
+      createdAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
+      deadline: addDays(today, 10),
+      status: "active",
+      timezone: "America/New_York",
+    },
+    {
+      id: "task-005",
+      contractAddress: "CEEE...",
+      functionName: "trigger_liquidation",
+      interval: 1800,
+      gasBalance: 20,
+      createdAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
+      deadline: addDays(today, 3),
+      status: "completed",
+      description: "Monitor and trigger liquidation events",
+      timezone: "America/New_York",
+    },
+  ];
+}
 
 export default function Home() {
+  const [tasks] = useState<Task[]>(generateMockTasks());
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
   return (
     <div className="min-h-screen bg-neutral-900 text-neutral-100 font-sans">
       {/* Header */}
@@ -17,6 +96,30 @@ export default function Home() {
       </header>
 
       <main className="container mx-auto px-6 py-12">
+        {/* Calendar Section */}
+        <section className="mb-12 space-y-6">
+          <h2 className="text-2xl font-bold">Task Scheduling Calendar</h2>
+          <Calendar
+            tasks={tasks}
+            onTaskClick={setSelectedTask}
+            locale="en-US"
+            timezone="America/New_York"
+          />
+        </section>
+
+        {/* Selected Task Detail */}
+        {selectedTask && (
+          <section className="mb-12 space-y-6">
+            <h2 className="text-2xl font-bold">Task Details</h2>
+            <TaskDetail
+              task={selectedTask}
+              onClose={() => setSelectedTask(null)}
+              timezone="America/New_York"
+              locale="en-US"
+            />
+          </section>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
           {/* Create Task Section */}
           <section className="space-y-6">
