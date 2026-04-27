@@ -12,6 +12,7 @@ const { dryRunTask } = require('./src/dryRun');
 const { wrapRpcServer } = require('./src/rpcWrapper');
 const { MetricsServer } = require('./src/metrics');
 const { GasMonitor } = require('./src/gasMonitor');
+const HistoryManager = require('./src/history');
 
 // Create root logger for the main module
 const logger = createLogger('keeper');
@@ -52,6 +53,9 @@ async function main() {
     const gasMonitor = new GasMonitor(createLogger('gasMonitor'));
     const metricsServer = new MetricsServer(gasMonitor, createLogger('metrics'));
     metricsServer.start();
+
+    // Initialize history manager
+    const history = new HistoryManager({ logger: createLogger('history') });
 
     // Initialize raw server and wrap it with circuit breaker
     const rawServer = new Server(config.rpcUrl);
@@ -141,13 +145,42 @@ async function main() {
 
                 if (status.status === 'SUCCESS') {
                     logger.info('Task executed successfully', { taskId });
+                    history.record({
+                        taskId,
+                        keeper: keypair.publicKey(),
+                        status: 'SUCCESS',
+                        txHash: response.hash,
+                        feePaid: status.feePaid || 0
+                    });
                 } else {
-                    throw new Error(`Transaction failed with status: ${status.status}`);
+                    const errorMsg = `Transaction failed with status: ${status.status}`;
+                    history.record({
+                        taskId,
+                        keeper: keypair.publicKey(),
+                        status: 'FAILED',
+                        txHash: response.hash,
+                        error: errorMsg
+                    });
+                    throw new Error(errorMsg);
                 }
+            } else {
+                // If we don't wait for confirmation, record as SUBMITTED/PENDING
+                history.record({
+                    taskId,
+                    keeper: keypair.publicKey(),
+                    status: 'SUBMITTED',
+                    txHash: response.hash
+                });
             }
 
         } catch (error) {
             logger.error('Failed to execute task', { taskId, error: error.message });
+            history.record({
+                taskId,
+                keeper: keypair.publicKey(),
+                status: 'ERROR',
+                error: error.message
+            });
             throw error;
         }
     };
