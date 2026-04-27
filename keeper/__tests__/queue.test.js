@@ -5,12 +5,34 @@
  */
 
 const { ExecutionQueue } = require('../src/queue');
+const { RetryScheduler } = require('../src/retryScheduler');
 
 describe('ExecutionQueue', () => {
   let queue;
+  let mockRetryScheduler;
 
   beforeEach(() => {
-    queue = new ExecutionQueue();
+    mockRetryScheduler = {
+      initialize: jest.fn().mockResolvedValue(undefined),
+      getReadyRetries: jest.fn().mockReturnValue([]),
+      scheduleRetry: jest.fn().mockResolvedValue({ scheduled: true }),
+      completeRetry: jest.fn().mockResolvedValue({ removed: true }),
+      getRetryMetadata: jest.fn().mockReturnValue(null),
+      getStatistics: jest.fn().mockReturnValue({ total: 0, pending: 0, overdue: 0 }),
+      shutdown: jest.fn().mockResolvedValue(undefined),
+    };
+    queue = new ExecutionQueue(3, null, mockRetryScheduler);
+  });
+
+  // Helper function to create a fresh mock for tests that need their own
+  const createMockRetryScheduler = () => ({
+    initialize: jest.fn().mockResolvedValue(undefined),
+    getReadyRetries: jest.fn().mockReturnValue([]),
+    scheduleRetry: jest.fn().mockResolvedValue({ scheduled: true }),
+    completeRetry: jest.fn().mockResolvedValue({ removed: true }),
+    getRetryMetadata: jest.fn().mockReturnValue(null),
+    getStatistics: jest.fn().mockReturnValue({ total: 0, pending: 0, overdue: 0 }),
+    shutdown: jest.fn().mockResolvedValue(undefined),
   });
 
   afterEach(async () => {
@@ -29,13 +51,13 @@ describe('ExecutionQueue', () => {
     });
 
     it('should accept custom concurrency limit', () => {
-      const customQueue = new ExecutionQueue(5);
+      const customQueue = new ExecutionQueue(5, null, mockRetryScheduler);
       expect(customQueue.concurrencyLimit).toBe(5);
     });
 
     it('should read concurrency from environment variable', () => {
       process.env.MAX_CONCURRENT_EXECUTIONS = '10';
-      const envQueue = new ExecutionQueue();
+      const envQueue = new ExecutionQueue(null, null, mockRetryScheduler);
       expect(envQueue.concurrencyLimit).toBe(10);
       delete process.env.MAX_CONCURRENT_EXECUTIONS;
     });
@@ -54,6 +76,11 @@ describe('ExecutionQueue', () => {
 
     it('should have failedCount of 0 initially', () => {
       expect(queue.failedCount).toBe(0);
+    });
+
+    it('should create retry scheduler if not provided', () => {
+      const queueWithoutScheduler = new ExecutionQueue();
+      expect(queueWithoutScheduler.retryScheduler).toBeDefined();
     });
   });
 
@@ -76,7 +103,7 @@ describe('ExecutionQueue', () => {
     });
 
     it('should respect MAX_CONCURRENT_EXECUTIONS', async () => {
-      const concurrentQueue = new ExecutionQueue(2);
+      const concurrentQueue = new ExecutionQueue(2, null, mockRetryScheduler);
       let concurrentExecutions = 0;
       let maxConcurrent = 0;
 
@@ -120,7 +147,7 @@ describe('ExecutionQueue', () => {
       const executorFn = jest.fn().mockRejectedValue(error);
       await queue.enqueue([1], executorFn);
 
-      expect(failedSpy).toHaveBeenCalledWith(1, error);
+      expect(failedSpy).toHaveBeenCalledWith(1, error, expect.any(Object));
     });
 
     it('should emit cycle:complete event', async () => {
@@ -231,7 +258,7 @@ describe('ExecutionQueue', () => {
       const mockMetrics = {
         increment: jest.fn(),
       };
-      const metricsQueue = new ExecutionQueue(3, mockMetrics);
+      const metricsQueue = new ExecutionQueue(3, mockMetrics, createMockRetryScheduler());
 
       const executorFn = jest.fn().mockResolvedValue(undefined);
       await metricsQueue.enqueue([1, 2], executorFn);
@@ -243,7 +270,7 @@ describe('ExecutionQueue', () => {
       const mockMetrics = {
         increment: jest.fn(),
       };
-      const metricsQueue = new ExecutionQueue(3, mockMetrics);
+      const metricsQueue = new ExecutionQueue(3, mockMetrics, createMockRetryScheduler());
 
       const executorFn = jest.fn().mockResolvedValue(undefined);
       await metricsQueue.enqueue([1], executorFn);
@@ -255,7 +282,7 @@ describe('ExecutionQueue', () => {
       const mockMetrics = {
         increment: jest.fn(),
       };
-      const metricsQueue = new ExecutionQueue(3, mockMetrics);
+      const metricsQueue = new ExecutionQueue(3, mockMetrics, createMockRetryScheduler());
 
       const executorFn = jest.fn().mockRejectedValue(new Error('Failed'));
       await metricsQueue.enqueue([1], executorFn);
@@ -268,12 +295,169 @@ describe('ExecutionQueue', () => {
         increment: jest.fn(),
         record: jest.fn(),
       };
-      const metricsQueue = new ExecutionQueue(3, mockMetrics);
+      const metricsQueue = new ExecutionQueue(3, mockMetrics, createMockRetryScheduler());
 
       const executorFn = jest.fn().mockResolvedValue(undefined);
       await metricsQueue.enqueue([1], executorFn);
 
       expect(mockMetrics.record).toHaveBeenCalledWith('lastCycleDurationMs', expect.any(Number));
+    });
+  });
+
+  describe('retry scheduler integration', () => {
+    it('should initialize retry scheduler', async () => {
+      await queue.initialize();
+      expect(queue.retryScheduler.initialize).toHaveBeenCalled();
+    });
+
+    it('should get ready retries with limit', () => {
+      queue.retryScheduler.getReadyRetries.mockReturnValue([
+        { taskId: 1, nextAttemptTime: Date.now() },
+        { taskId: 2, nextAttemptTime: Date.now() },
+        { taskId: 3, nextAttemptTime: Date.now() },
+      ]);
+
+      const readyRetries = queue.getReadyRetries(2);
+
+      expect(queue.retryScheduler.getReadyRetries).toHaveBeenCalled();
+      expect(readyRetries.length).toBe(2);
+      expect(queue.retryTaskIds.has(1)).toBe(true);
+      expect(queue.retryTaskIds.has(2)).toBe(true);
+    });
+
+    it('should enqueue retry tasks', async () => {
+      const retryTasks = [
+        { taskId: 1, nextAttemptTime: Date.now() },
+        { taskId: 2, nextAttemptTime: Date.now() },
+      ];
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueueRetries(retryTasks, executorFn);
+
+      expect(executorFn).toHaveBeenCalledTimes(2);
+      expect(queue.retryScheduler.completeRetry).toHaveBeenCalledWith(1, true);
+      expect(queue.retryScheduler.completeRetry).toHaveBeenCalledWith(2, true);
+    });
+
+    it('should handle retry task failure', async () => {
+      const retryTasks = [{ taskId: 1, nextAttemptTime: Date.now() }];
+      const executorFn = jest.fn().mockRejectedValue(new Error('Retry failed'));
+
+      await queue.enqueueRetries(retryTasks, executorFn);
+
+      expect(queue.retryScheduler.completeRetry).toHaveBeenCalledWith(1, false);
+    });
+
+    it('should skip enqueueing tasks being retried', async () => {
+      queue.retryTaskIds.add(1);
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueue([1, 2], executorFn);
+
+      expect(executorFn).toHaveBeenCalledTimes(1);
+      expect(executorFn).toHaveBeenCalledWith(2);
+    });
+
+    it('should schedule retry on task failure', async () => {
+      const executorFn = jest.fn().mockRejectedValue(new Error('Network error'));
+      const taskConfigMap = { 1: { target: 'C...', function_name: 'test' } };
+
+      await queue.enqueue([1], executorFn, taskConfigMap);
+
+      expect(queue.retryScheduler.scheduleRetry).toHaveBeenCalledWith({
+        taskId: 1,
+        error: expect.any(Error),
+        currentAttempt: 0,
+        taskConfig: taskConfigMap[1],
+      });
+    });
+
+    it('should complete retry on task success', async () => {
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueue([1], executorFn);
+
+      expect(queue.retryScheduler.completeRetry).toHaveBeenCalledWith(1, true);
+    });
+
+    it('should get retry statistics', () => {
+      queue.retryScheduler.getStatistics.mockReturnValue({
+        total: 5,
+        pending: 3,
+        overdue: 2,
+      });
+
+      const stats = queue.getRetryStatistics();
+
+      expect(queue.retryScheduler.getStatistics).toHaveBeenCalled();
+      expect(stats.total).toBe(5);
+    });
+
+    it('should shutdown retry scheduler', async () => {
+      await queue.shutdown();
+      expect(queue.retryScheduler.shutdown).toHaveBeenCalled();
+    });
+
+    it('should emit retry:started event', async () => {
+      const retryStartedSpy = jest.fn();
+      queue.on('retry:started', retryStartedSpy);
+
+      const retryTasks = [{ taskId: 1, nextAttemptTime: Date.now() }];
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueueRetries(retryTasks, executorFn);
+
+      expect(retryStartedSpy).toHaveBeenCalledWith(1, retryTasks[0]);
+    });
+
+    it('should emit retry:success event', async () => {
+      const retrySuccessSpy = jest.fn();
+      queue.on('retry:success', retrySuccessSpy);
+
+      const retryTasks = [{ taskId: 1, nextAttemptTime: Date.now() }];
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueueRetries(retryTasks, executorFn);
+
+      expect(retrySuccessSpy).toHaveBeenCalledWith(1, retryTasks[0]);
+    });
+
+    it('should emit retry:failed event', async () => {
+      const retryFailedSpy = jest.fn();
+      queue.on('retry:failed', retryFailedSpy);
+
+      const retryTasks = [{ taskId: 1, nextAttemptTime: Date.now() }];
+      const executorFn = jest.fn().mockRejectedValue(new Error('Failed'));
+      queue.retryScheduler.completeRetry.mockResolvedValue({ removed: false, rescheduled: true });
+
+      await queue.enqueueRetries(retryTasks, executorFn);
+
+      expect(retryFailedSpy).toHaveBeenCalledWith(
+        1,
+        expect.any(Error),
+        retryTasks[0],
+        expect.any(Object),
+      );
+    });
+
+    it('should emit retry:cycle:complete event', async () => {
+      const retryCycleSpy = jest.fn();
+      queue.on('retry:cycle:complete', retryCycleSpy);
+
+      const retryTasks = [{ taskId: 1, nextAttemptTime: Date.now() }];
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueueRetries(retryTasks, executorFn);
+
+      expect(retryCycleSpy).toHaveBeenCalled();
+    });
+
+    it('should handle empty retry tasks array', async () => {
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueueRetries([], executorFn);
+
+      expect(executorFn).not.toHaveBeenCalled();
     });
   });
 });

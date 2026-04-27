@@ -1,17 +1,35 @@
 const EventEmitter = require('events');
-const { createConcurrencyLimit } = require('./concurrency');
+const { createRateLimiter } = require('./concurrency');
 const { RetryScheduler } = require('./retryScheduler');
+const { createLogger } = require('./logger');
 
 class ExecutionQueue extends EventEmitter {
-  constructor(limit, metricsServer, retryScheduler) {
+  constructor(limit, metricsServer, retryScheduler, options = {}) {
     super();
+
+    this.logger = options.logger || createLogger('queue');
 
     this.concurrencyLimit = parseInt(
       limit || process.env.MAX_CONCURRENT_EXECUTIONS || 3,
       10,
     );
 
-    this.limit = createConcurrencyLimit(this.concurrencyLimit);
+    this.maxWritesPerSecond = parseInt(
+      options.maxWritesPerSecond || process.env.MAX_WRITES_PER_SECOND || 5,
+      10,
+    );
+
+    this.limit = createRateLimiter({
+      concurrency: this.concurrencyLimit,
+      rps: this.maxWritesPerSecond,
+      logger: this.logger,
+      name: 'execution-writes',
+      onThrottle: (event) => {
+        if (this.metricsServer) {
+          this.metricsServer.increment('throttledRequestsTotal', { name: event.name });
+        }
+      },
+    });
     this.metricsServer = metricsServer;
     this.retryScheduler = retryScheduler || new RetryScheduler();
 

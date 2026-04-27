@@ -26,6 +26,11 @@ export function loadConfig() {
     contractId: process.env.CONTRACT_ID,
     pollIntervalMs:
       parseInt(process.env.POLLING_INTERVAL_MS, 10) || 10000,
+    // Concurrency & Rate Limiting
+    maxConcurrentReads: parseInt(process.env.MAX_CONCURRENT_READS, 10) || 10,
+    maxReadsPerSecond: parseInt(process.env.MAX_READS_PER_SECOND, 10) || 20,
+    maxConcurrentWrites: parseInt(process.env.MAX_CONCURRENT_WRITES, 10) || 3,
+    maxWritesPerSecond: parseInt(process.env.MAX_WRITES_PER_SECOND, 10) || 5,
     // Retry configuration
     maxRetries: parseInt(process.env.MAX_RETRIES, 10) || 3,
     retryBaseDelayMs: parseInt(process.env.RETRY_BASE_DELAY_MS, 10) || 1000,

@@ -49,47 +49,62 @@ async function main() {
 
     // Initialize polling engine with logger
     const poller = new TaskPoller(server, config.contractId, {
-        maxConcurrentReads: process.env.MAX_CONCURRENT_READS,
+        maxConcurrentReads: config.maxConcurrentReads,
+        maxReadsPerSecond: config.maxReadsPerSecond,
         logger: createLogger('poller')
     });
-    logger.info('Poller initialized', { contractId: config.contractId });
-rtry scheduler
+    logger.info('Poller initialized', { 
+        contractId: config.contractId,
+        maxConcurrentReads: config.maxConcurrentReads,
+        maxReadsPerSecond: config.maxReadsPerSecond
+    });
+
+    // Initialize retry scheduler
     const retryScheduler = new RetryScheduler();
     await retryScheduler.initialize();
     logger.info('Retry scheduler initialized', { 
         retentionDays: process.env.RETRY_RETENTION_DAYS || 7,
-        maRtries: proess.env.MAX_RETRIES || 3
+        maxRetries: config.maxRetries
     });
 
-    // Initialize exec with retry scheduler
-    // Initialize execution queuenull, null, retryScheduler
-    await queue.initialize();
-    const queue = new ExecutionQueue();
+    // Initialize execution queue
     const queueLogger = createLogger('queue');
+    const queue = new ExecutionQueue(
+        config.maxConcurrentWrites,
+        null, // metricsServer
+        retryScheduler,
+        {
+            maxWritesPerSecond: config.maxWritesPerSecond,
+            logger: queueLogger
+        }
+    );
+    await queue.initialize();
 
     queue.on('task:started', (taskId) => queueLogger.info('Started execution', { taskId }));
-    queue.on('task:success', (taskId) =>, scheduleResult queu{
-        eLogger.info('Task executed success
-            fully', 
-            { taskId }));,
-           retryScheduled: scheduleResult?.scheduled || false
-        ;
-        if (scheduleResult?.scheduled {
+    queue.on('task:success', (taskId) => {
+        queueLogger.info('Task executed successfully', { taskId });
+    });
+    queue.on('task:failed', (taskId, err, scheduleResult) => {
+        queueLogger.error('Task failed', { 
+            taskId, 
+            error: err.message,
+            retryScheduled: scheduleResult?.scheduled || false
+        });
+        if (scheduleResult?.scheduled) {
             queueLogger.info('Retry scheduled', { 
                 taskId, 
                 nextAttempt: new Date(scheduleResult.nextAttemptTime).toISOString(),
                 attempt: scheduleResult.attemptNumber
-            })
+            });
         }
     });
-    queue.on('task:failed', (taskId, err) => queueLogger.erroycle complete', stats));
     
     // Retry-specific events
     queue.on('retry:started', (taskId, retryMetadata) => {
         queueLogger.info('Retry started', { 
             taskId, 
             attempt: retryMetadata.currentAttempt,
-            failureReason: retryMetadata.failureReason.message
+            failureReason: retryMetadata.failureReason?.message || 'unknown'
         });
     });
     queue.on('retry:success', (taskId, retryMetadata) => {
@@ -103,7 +118,7 @@ rtry scheduler
             rescheduled: completeResult?.rescheduled || false
         });
     });
-    queue.on('retry:cycle:complete', (stats) => queueLogger.info('Retry cr('Task failed', { taskId, error: err.message }));
+    queue.on('retry:cycle:complete', (stats) => queueLogger.info('Retry cycle complete', stats));
     queue.on('cycle:complete', (stats) => queueLogger.info('Cycle complete', stats));
 
     // Task executor function - calls contract.execute(keeper, task_id)
@@ -154,43 +169,23 @@ rtry scheduler
                 let attempts = 0;
                 const maxAttempts = 10;
 
-            // Fetch task conf gs  or retry scheduling
-            const taskConfigMap = {};
-            for  const taskIw of dhile (sta) {
-                try {
-                    const taskConfig = await pollertgetTaskConfig(taskId);
-                    taskConfigMap[taskId] = taskConfig;
-                } catch (err) {
-                    queueLogger.warn('Failed to fetch task config', { taskId, error: err.message });
-                }
-            }
-
-            if (dueTaskIds.us.status === 'PENDING' && attempts < maxAttempts) {
+                while (status.status === 'PENDING' && attempts < maxAttempts) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    status = await server.getTransaction(re, taskConfigMapsponse.hash);
+                    status = await server.getTransaction(response.hash);
                     attempts++;
                 }
 
-
-            // Process ready retries (fair scheduling - max 2 per cycle)
-        await queue.shutdown(); // Persist retries
-            const maxRetriesPerCycle = parseInt(process.env.MAX_RETRIES_PER_CYCLE || '2', 10);
-            const readyRetries = queue.getReadyRetries(maxRetriesPerCycle);
-            
-            if (readyRetries.length > 0) {
-                logger.info('Processing ready retries', { retryCount: readyRetries.length });
-                await queue.enqueueRetries(readyRetries, executeTask);
-            }
-
-            // Log retry statistics
-            const retryStats = queue.getRetryStatistics();
-            logger.info('Retry queue statistics', retryStats);
                 if (status.status === 'SUCCESS') {
                     logger.info('Task executed successfully', { taskId });
                 } else {
                     throw new Error(`Transaction failed with status: ${status.status}`);
                 }
             }
+        } catch (error) {
+            logger.error('Failed to execute task', { taskId, error: error.message });
+            throw error;
+        }
+    };
 
         } catch (error) {
             logger.error('Failed to execute task', { taskId, error: error.message });
@@ -223,12 +218,36 @@ rtry scheduler
             // Poll for due tasks
             const dueTaskIds = await poller.pollDueTasks(taskIds);
 
+            // Fetch task configs for retry scheduling (needed if task fails)
+            const taskConfigMap = {};
+            for (const taskId of dueTaskIds) {
+                try {
+                    const taskConfig = await poller.getTaskConfig(taskId);
+                    taskConfigMap[taskId] = taskConfig;
+                } catch (err) {
+                    logger.warn('Failed to fetch task config', { taskId, error: err.message });
+                }
+            }
+
             if (dueTaskIds.length > 0) {
                 logger.info('Found due tasks, enqueueing for execution', { dueCount: dueTaskIds.length });
-                await queue.enqueue(dueTaskIds, executeTask);
+                await queue.enqueue(dueTaskIds, executeTask, taskConfigMap);
             } else {
                 logger.info('No tasks due for execution');
             }
+
+            // Process ready retries (fair scheduling)
+            const maxRetriesPerCycle = parseInt(process.env.MAX_RETRIES_PER_CYCLE || '2', 10);
+            const readyRetries = queue.getReadyRetries(maxRetriesPerCycle);
+            
+            if (readyRetries.length > 0) {
+                logger.info('Processing ready retries', { retryCount: readyRetries.length });
+                await queue.enqueueRetries(readyRetries, executeTask);
+            }
+
+            // Log retry statistics
+            const retryStats = queue.getRetryStatistics();
+            logger.info('Retry queue statistics', retryStats);
 
             logger.info('Polling cycle complete');
 
