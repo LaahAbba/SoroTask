@@ -1,4 +1,5 @@
-import '@testing-library/jest-dom'
+require('@testing-library/jest-dom')
+const React = require('react')
 
 // Mock environment variables for tests
 process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3000'
@@ -33,6 +34,6 @@ jest.mock('next/image', () => ({
   __esModule: true,
   default: (props) => {
     // eslint-disable-next-line jsx-a11y/alt-text
-    return <img {...props} />
+    return React.createElement('img', props)
   },
 }))

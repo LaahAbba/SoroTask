@@ -38,9 +38,10 @@ class TaskPoller {
      * Poll the contract for all registered tasks and determine which are due for execution.
      *
      * @param {number[]} taskIds - Array of task IDs to check
+     * @param {Object} options - Optional parameters (e.g. registry)
      * @returns {Promise<number[]>} Array of task IDs that are due for execution
      */
-  async pollDueTasks(taskIds) {
+  async pollDueTasks(taskIds, options = {}) {
     const startTime = Date.now();
     this.stats.lastPollTime = new Date().toISOString();
     this.stats.tasksChecked = 0;
@@ -64,7 +65,7 @@ class TaskPoller {
 
       // Process tasks in parallel with concurrency control
       const taskChecks = taskIds.map(taskId =>
-        this.readLimit(() => this.checkTask(taskId, currentTimestamp)),
+        this.readLimit(() => this.checkTask(taskId, currentTimestamp, options.registry)),
       );
 
       const results = await Promise.allSettled(taskChecks);
@@ -109,7 +110,7 @@ class TaskPoller {
      * @param {number} currentTimestamp - Current ledger timestamp
      * @returns {Promise<{isDue: boolean, taskId: number, reason?: string}>}
      */
-  async checkTask(taskId, currentTimestamp) {
+  async checkTask(taskId, currentTimestamp, registry) {
     try {
       // Read task configuration from contract using view call
       const taskConfig = await this.getTaskConfig(taskId);
@@ -117,6 +118,11 @@ class TaskPoller {
       if (!taskConfig) {
         this.logger.warn('Task not found (may have been deregistered)', { taskId });
         return { isDue: false, taskId, reason: 'not_found' };
+      }
+
+      // Update registry with latest task details
+      if (registry) {
+        registry.updateTask(taskId, { ...taskConfig, status: taskConfig.gas_balance > 0 ? 'active' : 'low_gas' });
       }
 
       // Check gas balance
