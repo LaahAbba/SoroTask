@@ -10,6 +10,7 @@ SoroTask now captures a lightweight set of interaction timings for the frontend 
 | `task_open` | Time from clicking a task card to the task drawer finishing paint | Reflects how quickly users can inspect task details |
 | `task_search` | Time from editing the search box to filtered results settling on screen | Helps catch slow filtering or render regressions |
 | `task_mutation` | Time from pressing a task action to the updated task state painting | Surfaces pause, resume, or refill responsiveness |
+| `media_render` | Time for an avatar or preview frame to resolve to loaded media or a fallback | Helps catch heavy images, broken media, and card-level rendering regressions |
 
 ## How metrics are captured
 
@@ -42,6 +43,7 @@ The current implementation is intentionally lightweight and production-friendly:
 - Rising `task_search` often suggests filtering work or large list rendering costs.
 - Rising `task_open` usually means the detail panel is rendering too much before it becomes interactive.
 - Rising `task_mutation` often points to async workflow delays, optimistic update gaps, or expensive post-mutation rerenders.
+- Rising `media_render` usually means image payloads, decoding, or above-the-fold media density are too expensive.
 
 ## Contributor workflow
 
