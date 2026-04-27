@@ -1,6 +1,37 @@
+'use client';
+
 import Image from "next/image";
+import { useState } from "react";
+import { useTimeTracking } from "./context/TimeTrackingContext";
+import { TaskCard } from "./components/TaskCard";
+import { Task } from "./types";
 
 export default function Home() {
+  const { state, dispatch } = useTimeTracking();
+  const [contractAddress, setContractAddress] = useState("");
+  const [functionName, setFunctionName] = useState("");
+  const [interval, setInterval] = useState(3600);
+  const [gasBalance, setGasBalance] = useState(10);
+
+  const handleRegisterTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      contractAddress,
+      functionName,
+      interval,
+      gasBalance,
+      createdAt: new Date(),
+      totalTime: 0,
+      timeEntries: [],
+    };
+    dispatch({ type: 'ADD_TASK', payload: newTask });
+    setContractAddress("");
+    setFunctionName("");
+    setInterval(3600);
+    setGasBalance(10);
+  };
+
   return (
     <div className="min-h-screen bg-neutral-900 text-neutral-100 font-sans">
       {/* Header */}
@@ -21,37 +52,73 @@ export default function Home() {
           {/* Create Task Section */}
           <section className="space-y-6">
             <h2 className="text-2xl font-bold">Create Automation Task</h2>
-            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
+            <form onSubmit={handleRegisterTask} className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
               <div>
                 <label className="block text-sm font-medium text-neutral-400 mb-1">Target Contract Address</label>
-                <input type="text" placeholder="C..." className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                <input
+                  type="text"
+                  placeholder="C..."
+                  value={contractAddress}
+                  onChange={(e) => setContractAddress(e.target.value)}
+                  className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                  required
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
-                <input type="text" placeholder="harvest_yield" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                <input
+                  type="text"
+                  placeholder="harvest_yield"
+                  value={functionName}
+                  onChange={(e) => setFunctionName(e.target.value)}
+                  className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                  required
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
-                  <input type="number" placeholder="3600" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  <input
+                    type="number"
+                    placeholder="3600"
+                    value={interval}
+                    onChange={(e) => setInterval(parseInt(e.target.value) || 3600)}
+                    className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                    required
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
-                  <input type="number" placeholder="10" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  <input
+                    type="number"
+                    placeholder="10"
+                    value={gasBalance}
+                    onChange={(e) => setGasBalance(parseInt(e.target.value) || 10)}
+                    className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                    required
+                  />
                 </div>
               </div>
-              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20">
+              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20" type="submit">
                 Register Task
               </button>
-            </div>
+            </form>
           </section>
 
           {/* Your Tasks Section */}
           <section className="space-y-6">
             <h2 className="text-2xl font-bold">Your Tasks</h2>
-            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 min-h-[300px] flex flex-col items-center justify-center text-neutral-500 shadow-xl">
-              <p>No tasks registered yet.</p>
-            </div>
+            {state.tasks.length === 0 ? (
+              <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 min-h-[300px] flex flex-col items-center justify-center text-neutral-500 shadow-xl">
+                <p>No tasks registered yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {state.tasks.map((task) => (
+                  <TaskCard key={task.id} task={task} />
+                ))}
+              </div>
+            )}
           </section>
         </div>
 

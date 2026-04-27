@@ -10,11 +10,11 @@ const createJestConfig = async () => {
     testEnvironment: 'jsdom',
     setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
     collectCoverageFrom: [
-      'src/**/*.{js,jsx,ts,tsx}',
-      '!src/**/*.d.ts',
-      '!src/**/*.stories.{js,jsx,ts,tsx}',
-      '!src/**/__tests__/**',
-      '!src/**/__mocks__/**',
+      'app/**/*.{js,jsx,ts,tsx}',
+      '!app/**/*.d.ts',
+      '!app/**/*.stories.{js,jsx,ts,tsx}',
+      '!app/**/__tests__/**',
+      '!app/**/__mocks__/**',
     ],
     coveragePathIgnorePatterns: [
       '/node_modules/',
