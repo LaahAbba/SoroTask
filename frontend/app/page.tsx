@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { endTimer, startTimer } from "@/lib/perf-monitor";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type TaskRow = {
   id: string;
@@ -35,6 +36,11 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+
+  const EMPTY_FORM = { contractAddress: "", functionName: "", interval: "", gasBalance: "" };
+  const [form, setForm] = useState(EMPTY_FORM);
+  const isDirty = Object.values(form).some((v) => v !== "");
+  const { confirmDiscard } = useUnsavedChanges(isDirty);
 
   useEffect(() => {
     routeLoadStartedRef.current = startTimer();
@@ -112,7 +118,12 @@ export default function Home() {
       mutation: "register_task",
       optimistic: true,
     });
+    setForm(EMPTY_FORM);
     setIsRegistering(false);
+  };
+
+  const onReset = () => {
+    if (confirmDiscard()) setForm(EMPTY_FORM);
   };
 
   return (
@@ -138,29 +149,66 @@ export default function Home() {
             <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
               <div>
                 <label className="block text-sm font-medium text-neutral-400 mb-1">Target Contract Address</label>
-                <input type="text" placeholder="C..." className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                <input
+                  type="text"
+                  placeholder="C..."
+                  value={form.contractAddress}
+                  onChange={(e) => setForm((f) => ({ ...f, contractAddress: e.target.value }))}
+                  className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
-                <input type="text" placeholder="harvest_yield" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                <input
+                  type="text"
+                  placeholder="harvest_yield"
+                  value={form.functionName}
+                  onChange={(e) => setForm((f) => ({ ...f, functionName: e.target.value }))}
+                  className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
-                  <input type="number" placeholder="3600" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  <input
+                    type="number"
+                    placeholder="3600"
+                    value={form.interval}
+                    onChange={(e) => setForm((f) => ({ ...f, interval: e.target.value }))}
+                    className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
-                  <input type="number" placeholder="10" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" />
+                  <input
+                    type="number"
+                    placeholder="10"
+                    value={form.gasBalance}
+                    onChange={(e) => setForm((f) => ({ ...f, gasBalance: e.target.value }))}
+                    className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                  />
                 </div>
               </div>
-              <button
-                onClick={onRegisterTask}
-                disabled={isRegistering}
-                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20"
-              >
-                {isRegistering ? "Registering..." : "Register Task"}
-              </button>
+              {isDirty && (
+                <p className="text-xs text-amber-400/80">You have unsaved changes.</p>
+              )}
+              <div className="flex gap-3 mt-2">
+                <button
+                  type="button"
+                  onClick={onReset}
+                  disabled={!isDirty || isRegistering}
+                  className="flex-1 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-200 font-medium py-3 rounded-lg transition-colors"
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={onRegisterTask}
+                  disabled={isRegistering}
+                  className="flex-[2] bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium py-3 rounded-lg transition-colors shadow-lg shadow-blue-600/20"
+                >
+                  {isRegistering ? "Registering..." : "Register Task"}
+                </button>
+              </div>
             </div>
           </section>
 
