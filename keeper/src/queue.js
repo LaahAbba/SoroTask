@@ -1,8 +1,8 @@
-const EventEmitter = require('events');
-const { createConcurrencyLimit } = require('./concurrency');
+const EventEmitter = require("events");
+const { createConcurrencyLimit } = require("./concurrency");
 
 class ExecutionQueue extends EventEmitter {
-  constructor(limit, metricsServer) {
+  constructor(limit, metricsServer, options = {}) {
     super();
 
     this.concurrencyLimit = parseInt(
@@ -12,6 +12,7 @@ class ExecutionQueue extends EventEmitter {
 
     this.limit = createConcurrencyLimit(this.concurrencyLimit);
     this.metricsServer = metricsServer;
+    this.idempotencyGuard = options.idempotencyGuard || null;
 
     this.depth = 0;
     this.inFlight = 0;
@@ -23,40 +24,74 @@ class ExecutionQueue extends EventEmitter {
   }
 
   async enqueue(taskIds, executorFn) {
-    const validTaskIds = taskIds.filter(
-      (id) => !this.failedTasks.has(id),
-    );
+    const validTaskIds = taskIds.filter((id) => !this.failedTasks.has(id));
 
     this.depth = validTaskIds.length;
 
     // Track tasks due for this cycle
     if (this.metricsServer) {
-      this.metricsServer.increment('tasksDueTotal', validTaskIds.length);
+      this.metricsServer.increment("tasksDueTotal", validTaskIds.length);
     }
 
     const cycleStartTime = Date.now();
 
     const cyclePromises = validTaskIds.map((taskId) => {
       return this.limit(async () => {
+        let attemptContext = null;
+
+        if (this.idempotencyGuard) {
+          const lockResult = this.idempotencyGuard.acquire(taskId);
+          if (!lockResult.acquired) {
+            if (this.metricsServer) {
+              this.metricsServer.increment("tasksSkippedIdempotencyTotal", 1);
+            }
+            this.emit("task:skipped", taskId, {
+              reason: "idempotency_lock",
+              attemptId: lockResult.attemptId,
+            });
+            return;
+          }
+          attemptContext = { attemptId: lockResult.attemptId };
+        }
+
         this.inFlight++;
         this.depth = Math.max(this.depth - 1, 0);
 
-        this.emit('task:started', taskId);
+        if (attemptContext) {
+          this.emit("task:started", taskId, attemptContext);
+        } else {
+          this.emit("task:started", taskId);
+        }
 
         try {
-          await executorFn(taskId);
+          if (attemptContext) {
+            await executorFn(taskId, attemptContext);
+          } else {
+            await executorFn(taskId);
+          }
           this.completed++;
           if (this.metricsServer) {
-            this.metricsServer.increment('tasksExecutedTotal', 1);
+            this.metricsServer.increment("tasksExecutedTotal", 1);
           }
-          this.emit('task:success', taskId);
+          if (this.idempotencyGuard) {
+            this.idempotencyGuard.markCompleted(taskId, {
+              attemptId: attemptContext?.attemptId,
+            });
+          }
+          this.emit("task:success", taskId);
         } catch (error) {
           this.failedCount++;
           this.failedTasks.add(taskId);
           if (this.metricsServer) {
-            this.metricsServer.increment('tasksFailedTotal', 1);
+            this.metricsServer.increment("tasksFailedTotal", 1);
           }
-          this.emit('task:failed', taskId, error);
+          if (this.idempotencyGuard) {
+            this.idempotencyGuard.markFailed(taskId, {
+              attemptId: attemptContext?.attemptId,
+              lastError: error.message || String(error),
+            });
+          }
+          this.emit("task:failed", taskId, error);
         } finally {
           this.inFlight--;
         }
@@ -72,10 +107,10 @@ class ExecutionQueue extends EventEmitter {
     } finally {
       const cycleDuration = Date.now() - cycleStartTime;
       if (this.metricsServer?.record) {
-        this.metricsServer.record('lastCycleDurationMs', cycleDuration);
+        this.metricsServer.record("lastCycleDurationMs", cycleDuration);
       }
 
-      this.emit('cycle:complete', {
+      this.emit("cycle:complete", {
         depth: this.depth,
         inFlight: this.inFlight,
         completed: this.completed,
