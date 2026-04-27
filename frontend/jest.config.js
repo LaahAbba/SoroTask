@@ -29,11 +29,12 @@ const createJestConfig = async () => {
       },
     },
     testMatch: [
+      '<rootDir>/__tests__/**/*.{js,jsx,ts,tsx}',
       '<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}',
       '<rootDir>/src/**/*.{spec,test}.{js,jsx,ts,tsx}',
     ],
     moduleNameMapper: {
-      '^@/(.*)$': '<rootDir>/src/$1',
+      '^@/(.*)$': '<rootDir>/$1',
     },
   })
 }
