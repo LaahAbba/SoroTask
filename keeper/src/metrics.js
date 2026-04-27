@@ -12,6 +12,7 @@ class Metrics {
       tasksDueTotal: 0,
       tasksExecutedTotal: 0,
       tasksFailedTotal: 0,
+      throttledRequestsTotal: 0,
     };
 
     this.gauges = {
@@ -79,11 +80,9 @@ class Metrics {
   }
 
   reset() {
-    this.counters = {
-      tasksCheckedTotal: 0,
-      tasksDueTotal: 0,
       tasksExecutedTotal: 0,
       tasksFailedTotal: 0,
+      throttledRequestsTotal: 0,
     };
     this.gauges = {
       avgFeePaidXlm: 0,
@@ -136,6 +135,14 @@ class MetricsServer {
     this.promTasksFailed = new promClient.Counter({
       name: 'keeper_tasks_failed_total',
       help: 'Total number of tasks that failed during execution',
+      registers: [this.register],
+    });
+ 
+    // Counter: Total requests throttled by rate limiter
+    this.promThrottledRequests = new promClient.Counter({
+      name: 'keeper_throttled_requests_total',
+      help: 'Total number of requests throttled by the rate limiter',
+      labelNames: ['limiter_name'],
       registers: [this.register],
     });
 
@@ -212,6 +219,8 @@ class MetricsServer {
     this.promTasksDue.inc(0);
     this.promTasksExecuted.inc(0);
     this.promTasksFailed.inc(0);
+    this.promThrottledRequests.inc({ limiter_name: 'poller-reads' }, 0);
+    this.promThrottledRequests.inc({ limiter_name: 'execution-writes' }, 0);
 
     this.promAvgFee.set(this.metrics.gauges.avgFeePaidXlm);
     this.promCycleDuration.set(this.metrics.gauges.lastCycleDurationMs);
@@ -341,6 +350,8 @@ class MetricsServer {
       this.promTasksExecuted.inc(amount);
     } else if (key === 'tasksFailedTotal') {
       this.promTasksFailed.inc(amount);
+    } else if (key === 'throttledRequestsTotal') {
+      this.promThrottledRequests.inc({ limiter_name: amount.name || 'unknown' }, amount.value || 1);
     }
   }
 

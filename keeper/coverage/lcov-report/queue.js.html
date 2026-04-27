@@ -37,9 +37,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">85.71% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>6/7</span>
+                <span class='fraction'>0/16</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line high'></div>
+    <div class='status-line low'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -350,7 +350,9 @@ class ExecutionQueue extends EventEmitter {
   constructor(limit, metricsServer, options = {}) {
     super();
 &nbsp;
-    this.concurrencyLimit = parseInt(
+<span class="cstat-no" title="statement not covered" >    this.logger = options.logger || createLogger('queue');</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    this.concurrencyLimit = parseInt(</span>
       limit || process.env.MAX_CONCURRENT_EXECUTIONS || 3,
       10,
     );
@@ -371,14 +373,82 @@ class ExecutionQueue extends EventEmitter {
   async enqueue(taskIds, executorFn) {
     const validTaskIds = taskIds.filter((id) =&gt; !this.failedTasks.has(id));
 &nbsp;
-    this.depth = validTaskIds.length;
+<span class="cstat-no" title="statement not covered" >    this.limit = createRateLimiter({</span>
+      concurrency: this.concurrencyLimit,
+      rps: this.maxWritesPerSecond,
+      logger: this.logger,
+      name: 'execution-writes',
+      onThrottle: <span class="fstat-no" title="function not covered" >(e</span>vent) =&gt; {
+<span class="cstat-no" title="statement not covered" >        if (this.metricsServer) {</span>
+<span class="cstat-no" title="statement not covered" >          this.metricsServer.increment('throttledRequestsTotal', { name: event.name });</span>
+        }
+      },
+    });
+<span class="cstat-no" title="statement not covered" >    this.metricsServer = metricsServer;</span>
+<span class="cstat-no" title="statement not covered" >    this.retryScheduler = retryScheduler || new RetryScheduler();</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    this.depth = 0;</span>
+<span class="cstat-no" title="statement not covered" >    this.inFlight = 0;</span>
+<span class="cstat-no" title="statement not covered" >    this.completed = 0;</span>
+<span class="cstat-no" title="statement not covered" >    this.failedCount = 0;</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    this.activePromises = [];</span>
+<span class="cstat-no" title="statement not covered" >    this.failedTasks = new Set();</span>
+&nbsp;
+    // Retry tracking
+<span class="cstat-no" title="statement not covered" >    this.retryTaskIds = new Set(); </span>// Tasks being retried in current cycle
+  }
+&nbsp;
+  /**
+   * Initialize the retry scheduler
+   */
+<span class="fstat-no" title="function not covered" >  as</span>ync initialize() {
+<span class="cstat-no" title="statement not covered" >    await this.retryScheduler.initialize();</span>
+  }
+&nbsp;
+  /**
+   * Get tasks ready for retry (fair scheduling)
+   * Returns a limited number of retries to prevent them from overtaking normal tasks
+   *
+   * @param {number} maxRetriesPerCycle - Maximum retries to process per cycle
+   * @returns {Array} - Array of task IDs ready for retry
+   */
+<span class="fstat-no" title="function not covered" >  ge</span>tReadyRetries(maxRetriesPerCycle = <span class="branch-0 cbranch-no" title="branch not covered" >2)</span> {
+    const readyRetries = <span class="cstat-no" title="statement not covered" >this.retryScheduler.getReadyRetries();</span>
+&nbsp;
+    // Limit retries per cycle to ensure fairness
+    // Retries should not overwhelm normal due tasks
+    const limitedRetries = <span class="cstat-no" title="statement not covered" >readyRetries.slice(0, maxRetriesPerCycle);</span>
+&nbsp;
+    // Mark these as being retried to prevent duplicates
+<span class="cstat-no" title="statement not covered" >    limitedRetries.forEach(<span class="fstat-no" title="function not covered" >re</span>try =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >      this.retryTaskIds.add(retry.taskId);</span>
+    });
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    return limitedRetries;</span>
+  }
+&nbsp;
+  /**
+   * Enqueue normal due tasks
+   *
+   * @param {Array} taskIds - Task IDs to execute
+   * @param {Function} executorFn - Executor function
+   * @param {Object} taskConfigMap - Map of taskId to task config (for retry scheduling)
+   */
+<span class="fstat-no" title="function not covered" >  as</span>ync enqueue(taskIds, executorFn, taskConfigMap = <span class="branch-0 cbranch-no" title="branch not covered" >{})</span> {
+    // Filter out tasks that are already being retried
+    const validTaskIds = <span class="cstat-no" title="statement not covered" >taskIds.filter(</span>
+<span class="fstat-no" title="function not covered" >      (i</span>d) =&gt; <span class="cstat-no" title="statement not covered" >!this.failedTasks.has(id) &amp;&amp; !this.retryTaskIds.has(id),</span>
+    );
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    this.depth = validTaskIds.length;</span>
 &nbsp;
     // Track tasks due for this cycle
     if (this.metricsServer) {
       this.metricsServer.increment("tasksDueTotal", validTaskIds.length);
     }
 &nbsp;
-    const cycleStartTime = Date.now();
+    const cycleStartTime = <span class="cstat-no" title="statement not covered" >Date.now();</span>
 &nbsp;
     const cyclePromises = validTaskIds.map((taskId) =&gt; {
       return this.limit(async () =&gt; {
@@ -438,15 +508,15 @@ class ExecutionQueue extends EventEmitter {
           }
           this.emit("task:failed", taskId, error);
         } finally {
-          this.inFlight--;
+<span class="cstat-no" title="statement not covered" >          this.inFlight--;</span>
         }
       });
     });
 &nbsp;
-    this.activePromises.push(...cyclePromises);
+<span class="cstat-no" title="statement not covered" >    this.activePromises.push(...cyclePromises);</span>
 &nbsp;
-    try {
-      await Promise.all(cyclePromises);
+<span class="cstat-no" title="statement not covered" >    try {</span>
+<span class="cstat-no" title="statement not covered" >      await Promise.all(cyclePromises);</span>
     } catch (_) {
       // already handled
     } finally {
@@ -462,27 +532,121 @@ class ExecutionQueue extends EventEmitter {
         failed: this.failedCount,
       });
 &nbsp;
-      this.activePromises = [];
-      this.completed = 0;
-      this.failedCount = 0;
+<span class="cstat-no" title="statement not covered" >      this.activePromises = [];</span>
+<span class="cstat-no" title="statement not covered" >      this.completed = 0;</span>
+<span class="cstat-no" title="statement not covered" >      this.failedCount = 0;</span>
+&nbsp;
+      // Clear retry task IDs for next cycle
+<span class="cstat-no" title="statement not covered" >      this.retryTaskIds.clear();</span>
     }
   }
 &nbsp;
-  async drain() {
-    this.limit.clearQueue();
-    this.depth = 0;
-&nbsp;
-    if (this.activePromises.length &gt; 0) {
-      await Promise.allSettled(this.activePromises);
+  /**
+   * Enqueue retry tasks (separate from normal tasks for fairness)
+   *
+   * @param {Array} retryTasks - Array of retry metadata objects
+   * @param {Function} executorFn - Executor function
+   */
+<span class="fstat-no" title="function not covered" >  as</span>ync enqueueRetries(retryTasks, executorFn) {
+<span class="cstat-no" title="statement not covered" >    if (retryTasks.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >      return;</span>
     }
 &nbsp;
-    while (this.inFlight &gt; 0) {
+<span class="cstat-no" title="statement not covered" >    this.depth += retryTasks.length;</span>
+&nbsp;
+    const cycleStartTime = <span class="cstat-no" title="statement not covered" >Date.now();</span>
+&nbsp;
+    const cyclePromises = <span class="cstat-no" title="statement not covered" >retryTasks.map(<span class="fstat-no" title="function not covered" >(r</span>etryTask) =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >      return this.limit(<span class="fstat-no" title="function not covered" >as</span>ync () =&gt; {</span>
+        const { taskId } = <span class="cstat-no" title="statement not covered" >retryTask;</span>
+<span class="cstat-no" title="statement not covered" >        this.inFlight++;</span>
+<span class="cstat-no" title="statement not covered" >        this.depth = Math.max(this.depth - 1, 0);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >        this.emit('retry:started', taskId, retryTask);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >        try {</span>
+<span class="cstat-no" title="statement not covered" >          await executorFn(taskId);</span>
+<span class="cstat-no" title="statement not covered" >          this.completed++;</span>
+&nbsp;
+          // Mark retry as successful
+<span class="cstat-no" title="statement not covered" >          await this.retryScheduler.completeRetry(taskId, true);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >          if (this.metricsServer) {</span>
+<span class="cstat-no" title="statement not covered" >            this.metricsServer.increment('retriesExecutedTotal', 1);</span>
+<span class="cstat-no" title="statement not covered" >            this.metricsServer.increment('tasksExecutedTotal', 1);</span>
+          }
+<span class="cstat-no" title="statement not covered" >          this.emit('retry:success', taskId, retryTask);</span>
+        } catch (error) {
+<span class="cstat-no" title="statement not covered" >          this.failedCount++;</span>
+&nbsp;
+          // Update retry status (may reschedule if not at max retries)
+          const completeResult = <span class="cstat-no" title="statement not covered" >await this.retryScheduler.completeRetry(taskId, false);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >          if (this.metricsServer) {</span>
+<span class="cstat-no" title="statement not covered" >            this.metricsServer.increment('retriesFailedTotal', 1);</span>
+          }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >          this.emit('retry:failed', taskId, error, retryTask, completeResult);</span>
+        } finally {
+<span class="cstat-no" title="statement not covered" >          this.inFlight--;</span>
+        }
+      });
+    });
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    this.activePromises.push(...cyclePromises);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    try {</span>
+<span class="cstat-no" title="statement not covered" >      await Promise.all(cyclePromises);</span>
+    } catch (_) {
+      // already handled
+    } finally {
+      const cycleDuration = <span class="cstat-no" title="statement not covered" >Date.now() - cycleStartTime;</span>
+<span class="cstat-no" title="statement not covered" >      if (this.metricsServer?.record) {</span>
+<span class="cstat-no" title="statement not covered" >        this.metricsServer.record('lastRetryCycleDurationMs', cycleDuration);</span>
+      }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >      this.emit('retry:cycle:complete', {</span>
+        depth: retryTasks.length,
+        inFlight: this.inFlight,
+        completed: this.completed,
+        failed: this.failedCount,
+      });
+&nbsp;
+<span class="cstat-no" title="statement not covered" >      this.activePromises = [];</span>
+<span class="cstat-no" title="statement not covered" >      this.completed = 0;</span>
+<span class="cstat-no" title="statement not covered" >      this.failedCount = 0;</span>
+    }
+  }
+&nbsp;
+<span class="fstat-no" title="function not covered" >  as</span>ync drain() {
+<span class="cstat-no" title="statement not covered" >    this.limit.clearQueue();</span>
+<span class="cstat-no" title="statement not covered" >    this.depth = 0;</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    if (this.activePromises.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >      await Promise.allSettled(this.activePromises);</span>
+    }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    while (this.inFlight &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >      await new Promise(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >setTimeout(r, 50))</span>;</span>
     }
   }
+&nbsp;
+  /**
+   * Get retry queue statistics
+   */
+<span class="fstat-no" title="function not covered" >  ge</span>tRetryStatistics() {
+<span class="cstat-no" title="statement not covered" >    return this.retryScheduler.getStatistics();</span>
+  }
+&nbsp;
+  /**
+   * Shutdown gracefully
+   */
+<span class="fstat-no" title="function not covered" >  as</span>ync shutdown() {
+<span class="cstat-no" title="statement not covered" >    await this.retryScheduler.shutdown();</span>
+  }
 }
 &nbsp;
-module.exports = { ExecutionQueue };
+<span class="cstat-no" title="statement not covered" >module.exports = { ExecutionQueue };</span>
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->

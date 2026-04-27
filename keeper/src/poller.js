@@ -1,5 +1,5 @@
 const { Contract, xdr, TransactionBuilder, BASE_FEE, Networks, scValToNative } = require('@stellar/stellar-sdk');
-const { createConcurrencyLimit } = require('./concurrency');
+const { createRateLimiter } = require('./concurrency');
 const { createLogger } = require('./logger');
 
 /**
@@ -14,15 +14,30 @@ class TaskPoller {
 
     // Structured logger for poller module
     this.logger = options.logger || createLogger('poller');
+    this.metricsServer = options.metricsServer;
 
     // Configuration with defaults
     this.maxConcurrentReads = parseInt(
       options.maxConcurrentReads || process.env.MAX_CONCURRENT_READS || 10,
       10,
     );
+    this.maxReadsPerSecond = parseInt(
+      options.maxReadsPerSecond || process.env.MAX_READS_PER_SECOND || 20,
+      10,
+    );
 
-    // Create concurrency limiter for parallel task reads
-    this.readLimit = createConcurrencyLimit(this.maxConcurrentReads);
+    // Create rate limiter for parallel task reads
+    this.readLimit = createRateLimiter({
+      concurrency: this.maxConcurrentReads,
+      rps: this.maxReadsPerSecond,
+      logger: this.logger,
+      name: 'poller-reads',
+      onThrottle: (event) => {
+        if (this.metricsServer) {
+          this.metricsServer.increment('throttledRequestsTotal', { name: event.name });
+        }
+      },
+    });
 
     // Statistics
     this.stats = {
