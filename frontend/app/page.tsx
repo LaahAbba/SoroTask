@@ -319,13 +319,13 @@ export default function Home() {
           <h3 className="text-2xl font-bold">Execution Logs</h3>
           <div className="overflow-hidden rounded-xl border border-neutral-700/50 shadow-xl">
             <table className="w-full text-left text-sm text-neutral-400">
-              <thead className="bg-neutral-800/80 text-neutral-200 backdrop-blur-sm">
+              <thead className="bg-neutral-800 text-neutral-200">
                 <tr>
-                  <th className="px-6 py-4 font-medium">Task ID</th>
-                  <th className="px-6 py-4 font-medium">Target</th>
-                  <th className="px-6 py-4 font-medium">Keeper</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium">Timestamp</th>
+                  <th className="px-6 py-4">Task ID</th>
+                  <th className="px-6 py-4">Target</th>
+                  <th className="px-6 py-4">Keeper</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">Timestamp</th>
                 </tr>
               </thead>
 
@@ -337,9 +337,7 @@ export default function Home() {
                   <td className="px-6 py-4 font-mono">CC...A12B</td>
                   <td className="px-6 py-4 font-mono">GA...99X</td>
                   <td className="px-6 py-4">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
-                      Success
-                    </span>
+                    <TransactionStatus status="success" compact />
                   </td>
                   <td className="px-6 py-4">2 mins ago</td>
                 </tr>
