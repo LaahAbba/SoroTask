@@ -1,10 +1,14 @@
 'use client';
 
+'use client';
+
 import Image from "next/image";
 import { useState } from "react";
 import { useTimeTracking } from "./context/TimeTrackingContext";
 import { TaskCard } from "./components/TaskCard";
 import { Task } from "./types";
+import { MentionsInput } from "./components/MentionsInput";
+import { MentionRenderer } from "./components/MentionRenderer";
 
 export default function Home() {
   const { state, dispatch } = useTimeTracking();
@@ -12,6 +16,7 @@ export default function Home() {
   const [functionName, setFunctionName] = useState("");
   const [interval, setInterval] = useState(3600);
   const [gasBalance, setGasBalance] = useState(10);
+  const [demoText, setDemoText] = useState("");
 
   const handleRegisterTask = (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,35 +127,29 @@ export default function Home() {
           </section>
         </div>
 
-        {/* Execution Logs */}
+        {/* Mentions Demo Section */}
         <section className="mt-16 space-y-6">
-          <h2 className="text-2xl font-bold">Execution Logs</h2>
-          <div className="overflow-hidden rounded-xl border border-neutral-700/50 shadow-xl">
-            <table className="w-full text-left text-sm text-neutral-400">
-              <thead className="bg-neutral-800/80 text-neutral-200 backdrop-blur-sm">
-                <tr>
-                  <th className="px-6 py-4 font-medium">Task ID</th>
-                  <th className="px-6 py-4 font-medium">Target</th>
-                  <th className="px-6 py-4 font-medium">Keeper</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium">Timestamp</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-800 bg-neutral-900/50">
-                {/* Mock Row */}
-                <tr className="hover:bg-neutral-800/50 transition-colors">
-                  <td className="px-6 py-4 font-mono text-neutral-300">#1024</td>
-                  <td className="px-6 py-4 font-mono">CC...A12B</td>
-                  <td className="px-6 py-4 font-mono">GA...99X</td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
-                      Success
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">2 mins ago</td>
-                </tr>
-              </tbody>
-            </table>
+          <h2 className="text-2xl font-bold">Mentions Demo</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 shadow-xl">
+              <h3 className="text-lg font-semibold mb-4">Input with Mentions</h3>
+              <MentionsInput
+                value={demoText}
+                onChange={setDemoText}
+                placeholder="Try typing @Alice, #Harvest, or $Contract..."
+                rows={4}
+              />
+            </div>
+            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 shadow-xl">
+              <h3 className="text-lg font-semibold mb-4">Rendered Output</h3>
+              <div className="min-h-[100px] p-3 bg-neutral-900/50 rounded-lg border border-neutral-700/50">
+                {demoText ? (
+                  <MentionRenderer text={demoText} />
+                ) : (
+                  <p className="text-neutral-500 italic">Rendered mentions will appear here...</p>
+                )}
+              </div>
+            </div>
           </div>
         </section>
       </main>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTimeTracking } from '../context/TimeTrackingContext';
 import { TimeEntry } from '../types';
+import { MentionsInput } from './MentionsInput';
 
 interface ManualTimeEntryProps {
   taskId: string;
@@ -65,13 +66,14 @@ export function ManualTimeEntry({ taskId, onClose }: ManualTimeEntryProps) {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-1">Description (optional)</label>
-            <textarea
+            <label className="block text-sm font-medium text-neutral-400 mb-1">
+              Description (optional) - Use @ for users, # for tasks, $ for contracts
+            </label>
+            <MentionsInput
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              onChange={setDescription}
+              placeholder="What did you work on? Mention @Alice or #Harvest Task"
               rows={3}
-              placeholder="What did you work on?"
             />
           </div>
           <div className="flex gap-3">
