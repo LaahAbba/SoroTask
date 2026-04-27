@@ -4,6 +4,7 @@ import { useTimeTracking } from '../context/TimeTrackingContext';
 import { TimeDisplay } from './TimeDisplay';
 import { TimerControls } from './TimerControls';
 import { ManualTimeEntry } from './ManualTimeEntry';
+import { MentionRenderer } from './MentionRenderer';
 
 interface TaskCardProps {
   task: Task;
@@ -67,11 +68,16 @@ export function TaskCard({ task }: TaskCardProps) {
             <h4 className="text-sm font-medium text-neutral-400 mb-2">Recent Entries</h4>
             <div className="space-y-2 max-h-32 overflow-y-auto">
               {task.timeEntries.slice(-3).reverse().map((entry) => (
-                <div key={entry.id} className="flex justify-between text-sm">
-                  <span className="text-neutral-300">
-                    {entry.isManual ? 'Manual' : 'Timer'} - {entry.startTime.toLocaleDateString()}
-                  </span>
-                  <TimeDisplay seconds={entry.duration} className="font-mono" />
+                <div key={entry.id} className="text-sm border-b border-neutral-700 pb-2 mb-2 last:border-b-0 last:pb-0 last:mb-0">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-neutral-300">
+                      {entry.isManual ? 'Manual' : 'Timer'} - {entry.startTime.toLocaleDateString()}
+                    </span>
+                    <TimeDisplay seconds={entry.duration} className="font-mono text-neutral-400" />
+                  </div>
+                  {entry.description && (
+                    <MentionRenderer text={entry.description} className="text-neutral-400 text-xs" />
+                  )}
                 </div>
               ))}
             </div>
