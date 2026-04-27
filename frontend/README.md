@@ -8,6 +8,7 @@ This frontend now includes a lightweight performance monitoring layer focused on
 - Task detail open latency
 - Search responsiveness
 - Task mutation responsiveness for pause, resume, and refill actions
+- Media rendering for avatars and task previews on card-heavy screens
 
 ## Development
 
@@ -34,3 +35,4 @@ Open `http://localhost:3000` and interact with the dashboard to generate local p
 ## Docs
 
 Implementation and interpretation guidance lives in [docs/performance-monitoring.md](./docs/performance-monitoring.md).
+Media rendering patterns for contributors live in [docs/media-rendering.md](./docs/media-rendering.md).

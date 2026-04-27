@@ -8,6 +8,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { OptimizedMedia } from "./optimized-media";
 import {
   afterNextPaint,
   createPerformanceMonitor,
@@ -24,11 +25,56 @@ type Task = {
   name: string;
   target: string;
   owner: string;
+  ownerRole: string;
   schedule: string;
   gasBalance: string;
   lastRun: string;
   status: TaskStatus;
+  ownerAvatar?: string | null;
+  previewImage?: string | null;
+  previewLabel: string;
 };
+
+function toDataUri(svg: string) {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function createAvatarDataUri(initials: string, accent: string) {
+  return toDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${accent}" />
+          <stop offset="100%" stop-color="#0f172a" />
+        </linearGradient>
+      </defs>
+      <rect width="96" height="96" rx="24" fill="url(#bg)" />
+      <text x="48" y="56" text-anchor="middle" font-size="28" font-family="Segoe UI, Arial, sans-serif" fill="#eff6ff" font-weight="700">${initials}</text>
+    </svg>
+  `);
+}
+
+function createPreviewDataUri(title: string, accent: string, detail: string) {
+  return toDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#020617" />
+          <stop offset="55%" stop-color="#0f172a" />
+          <stop offset="100%" stop-color="${accent}" />
+        </linearGradient>
+      </defs>
+      <rect width="640" height="400" rx="32" fill="url(#bg)" />
+      <rect x="32" y="32" width="576" height="336" rx="26" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.08)" />
+      <circle cx="112" cy="112" r="40" fill="${accent}" fill-opacity="0.55" />
+      <rect x="176" y="92" width="272" height="18" rx="9" fill="rgba(239,246,255,0.92)" />
+      <rect x="176" y="128" width="188" height="12" rx="6" fill="rgba(148,163,184,0.76)" />
+      <rect x="72" y="202" width="496" height="92" rx="24" fill="rgba(15,23,42,0.84)" stroke="rgba(255,255,255,0.08)" />
+      <text x="72" y="340" font-size="26" font-family="Segoe UI, Arial, sans-serif" fill="#e2e8f0">${title}</text>
+      <text x="72" y="240" font-size="18" font-family="Segoe UI, Arial, sans-serif" fill="#67e8f9">${detail}</text>
+    </svg>
+  `);
+}
 
 const seedTasks: Task[] = [
   {
@@ -36,50 +82,82 @@ const seedTasks: Task[] = [
     name: "Harvest Yield Vault",
     target: "vault.harvest()",
     owner: "Treasury Ops",
+    ownerRole: "Protocol Treasury",
     schedule: "Every 1 hour",
     gasBalance: "8.4 XLM",
     lastRun: "2 mins ago",
     status: "Healthy",
+    ownerAvatar: createAvatarDataUri("TO", "#22d3ee"),
+    previewImage: createPreviewDataUri(
+      "Yield vault snapshot",
+      "#22d3ee",
+      "Harvest preview",
+    ),
+    previewLabel: "Vault preview",
   },
   {
     id: "TASK-2187",
     name: "Rebalance Pool Fees",
     target: "amm.rebalance()",
     owner: "Liquidity Desk",
+    ownerRole: "DEX Operations",
     schedule: "Every 6 hours",
     gasBalance: "2.1 XLM",
     lastRun: "8 mins ago",
     status: "Warning",
+    ownerAvatar: createAvatarDataUri("LD", "#38bdf8"),
+    previewImage: createPreviewDataUri(
+      "Pool fee heatmap",
+      "#38bdf8",
+      "Rebalance trend",
+    ),
+    previewLabel: "Fee heatmap",
   },
   {
     id: "TASK-3320",
     name: "Rotate Keeper Window",
     target: "keeper.rotate()",
     owner: "Infra Team",
+    ownerRole: "Runtime Platform",
     schedule: "Every 12 hours",
     gasBalance: "12.7 XLM",
     lastRun: "14 mins ago",
     status: "Healthy",
+    ownerAvatar: createAvatarDataUri("IT", "#34d399"),
+    previewImage: createPreviewDataUri(
+      "Keeper coverage",
+      "#34d399",
+      "Rotation forecast",
+    ),
+    previewLabel: "Coverage chart",
   },
   {
     id: "TASK-4471",
     name: "Pause Failing Strategy",
     target: "strategy.pause()",
     owner: "Risk Ops",
+    ownerRole: "Risk Controls",
     schedule: "Manual failover",
     gasBalance: "5.3 XLM",
     lastRun: "31 mins ago",
     status: "Paused",
+    ownerAvatar: null,
+    previewImage: "/media/missing-strategy-preview.png",
+    previewLabel: "Fallback preview",
   },
   {
     id: "TASK-5508",
     name: "Top Up Reward Distributor",
     target: "distributor.topup()",
     owner: "Growth",
+    ownerRole: "Rewards Team",
     schedule: "Every 24 hours",
     gasBalance: "3.8 XLM",
     lastRun: "43 mins ago",
     status: "Warning",
+    ownerAvatar: createAvatarDataUri("GR", "#f59e0b"),
+    previewImage: null,
+    previewLabel: "No preview yet",
   },
 ];
 
@@ -110,6 +188,7 @@ export function TaskPerformanceDashboard() {
   const [feedback, setFeedback] = useState("Route performance instrumentation is active.");
   const [isSearching, startSearchTransition] = useTransition();
   const [isMutating, startMutationTransition] = useTransition();
+  const mediaMetricsRef = useRef(new Set<string>());
   const deferredQuery = useDeferredValue(query);
   const pendingSearchRef = useRef<null | (() => PerformanceMetric | null)>(null);
   const pendingOpenRef = useRef<null | (() => PerformanceMetric | null)>(null);
@@ -230,6 +309,35 @@ export function TaskPerformanceDashboard() {
       latest: Number(durations[0]?.toFixed(2) ?? 0),
     }));
   }, [metrics]);
+
+  const handleMediaRender = (
+    taskId: string,
+    surface: "avatar" | "preview",
+    state: "loaded" | "fallback",
+    duration: number,
+  ) => {
+    const metricKey = `${taskId}:${surface}:${state}`;
+    if (mediaMetricsRef.current.has(metricKey)) {
+      return;
+    }
+
+    mediaMetricsRef.current.add(metricKey);
+    const metric = monitor.report("media_render", duration, {
+      taskId,
+      surface,
+      state,
+    });
+
+    if (!metric) {
+      return;
+    }
+
+    setFeedback(
+      state === "loaded"
+        ? `${surface === "avatar" ? "Avatar" : "Preview"} rendered without layout shift.`
+        : `${surface === "avatar" ? "Avatar" : "Preview"} fallback protected the task card UX.`,
+    );
+  };
 
   const runMutation = (action: "pause" | "resume" | "refill") => {
     if (!selectedTask) {
@@ -419,49 +527,90 @@ export function TaskPerformanceDashboard() {
                         : "border-white/10 bg-white/[0.03] hover:border-cyan-300/25 hover:bg-white/[0.05]"
                     }`}
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-lg font-semibold text-white">
-                            {task.name}
-                          </span>
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium ${
-                              task.status === "Healthy"
-                                ? "bg-emerald-500/15 text-emerald-100"
-                                : task.status === "Warning"
-                                  ? "bg-amber-500/15 text-amber-100"
-                                  : "bg-rose-500/15 text-rose-100"
-                            }`}
-                          >
-                            {task.status}
-                          </span>
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_240px]">
+                      <div className="flex gap-4">
+                        <OptimizedMedia
+                          key={`${task.id}:avatar:${task.ownerAvatar ?? "fallback"}`}
+                          alt={`${task.owner} avatar`}
+                          src={task.ownerAvatar}
+                          width={72}
+                          height={72}
+                          sizes="72px"
+                          rounded="full"
+                          fallbackLabel={task.owner
+                            .split(" ")
+                            .map((word) => word[0])
+                            .join("")
+                            .slice(0, 2)}
+                          fallbackTone="cyan"
+                          className="h-[72px] w-[72px] shrink-0 ring-1 ring-white/10"
+                          onRenderComplete={(state, duration) =>
+                            handleMediaRender(task.id, "avatar", state, duration)
+                          }
+                        />
+
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-lg font-semibold text-white">
+                              {task.name}
+                            </span>
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                                task.status === "Healthy"
+                                  ? "bg-emerald-500/15 text-emerald-100"
+                                  : task.status === "Warning"
+                                    ? "bg-amber-500/15 text-amber-100"
+                                    : "bg-rose-500/15 text-rose-100"
+                              }`}
+                            >
+                              {task.status}
+                            </span>
+                          </div>
+                          <p className="font-mono text-sm text-slate-300">{task.id}</p>
+                          <p className="text-sm leading-6 text-slate-300">
+                            {task.target} owned by {task.owner}
+                          </p>
+                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                            {task.ownerRole}
+                          </p>
                         </div>
-                        <p className="font-mono text-sm text-slate-300">{task.id}</p>
-                        <p className="text-sm leading-6 text-slate-300">
-                          {task.target} owned by {task.owner}
-                        </p>
                       </div>
 
-                      <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-3">
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                            Schedule
-                          </p>
-                          <p className="mt-1 text-white">{task.schedule}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                            Gas
-                          </p>
-                          <p className="mt-1 text-white">{task.gasBalance}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                            Last run
-                          </p>
-                          <p className="mt-1 text-white">{task.lastRun}</p>
-                        </div>
+                      <OptimizedMedia
+                        key={`${task.id}:preview:${task.previewImage ?? "fallback"}`}
+                        alt={`${task.name} preview`}
+                        src={task.previewImage}
+                        width={640}
+                        height={400}
+                        sizes="(min-width: 1280px) 240px, (min-width: 768px) 40vw, 100vw"
+                        rounded="3xl"
+                        fallbackLabel={task.previewLabel}
+                        fallbackTone={task.status === "Healthy" ? "emerald" : "neutral"}
+                        className="h-full min-h-[150px] w-full ring-1 ring-white/10"
+                        onRenderComplete={(state, duration) =>
+                          handleMediaRender(task.id, "preview", state, duration)
+                        }
+                      />
+                    </div>
+
+                    <div className="mt-4 grid gap-2 text-sm text-slate-300 sm:grid-cols-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                          Schedule
+                        </p>
+                        <p className="mt-1 text-white">{task.schedule}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                          Gas
+                        </p>
+                        <p className="mt-1 text-white">{task.gasBalance}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                          Last run
+                        </p>
+                        <p className="mt-1 text-white">{task.lastRun}</p>
                       </div>
                     </div>
                   </button>
@@ -481,13 +630,56 @@ export function TaskPerformanceDashboard() {
 
               {selectedTask ? (
                 <div className="mt-5 space-y-5 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="space-y-1">
-                    <p className="text-lg font-semibold text-white">
-                      {selectedTask.name}
-                    </p>
-                    <p className="font-mono text-sm text-slate-300">
-                      {selectedTask.id}
-                    </p>
+                  <OptimizedMedia
+                    key={`${selectedTask.id}:drawer-preview:${selectedTask.previewImage ?? "fallback"}`}
+                    alt={`${selectedTask.name} preview`}
+                    src={selectedTask.previewImage}
+                    width={640}
+                    height={400}
+                    sizes="(min-width: 1280px) 28vw, 100vw"
+                    priority
+                    rounded="3xl"
+                    fallbackLabel={selectedTask.previewLabel}
+                    fallbackTone={selectedTask.status === "Healthy" ? "emerald" : "neutral"}
+                    className="w-full ring-1 ring-white/10"
+                    onRenderComplete={(state, duration) =>
+                      handleMediaRender(selectedTask.id, "preview", state, duration)
+                    }
+                  />
+
+                  <div className="flex items-center gap-4">
+                    <OptimizedMedia
+                      key={`${selectedTask.id}:drawer-avatar:${selectedTask.ownerAvatar ?? "fallback"}`}
+                      alt={`${selectedTask.owner} avatar`}
+                      src={selectedTask.ownerAvatar}
+                      width={80}
+                      height={80}
+                      sizes="80px"
+                      priority
+                      rounded="full"
+                      fallbackLabel={selectedTask.owner
+                        .split(" ")
+                        .map((word) => word[0])
+                        .join("")
+                        .slice(0, 2)}
+                      fallbackTone="cyan"
+                      className="h-20 w-20 shrink-0 ring-1 ring-white/10"
+                      onRenderComplete={(state, duration) =>
+                        handleMediaRender(selectedTask.id, "avatar", state, duration)
+                      }
+                    />
+
+                    <div className="space-y-1">
+                      <p className="text-lg font-semibold text-white">
+                        {selectedTask.name}
+                      </p>
+                      <p className="font-mono text-sm text-slate-300">
+                        {selectedTask.id}
+                      </p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                        {selectedTask.ownerRole}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="grid gap-4 text-sm text-slate-300 sm:grid-cols-2">

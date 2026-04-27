@@ -2,7 +2,8 @@ export type PerformanceMetricName =
   | "route_load"
   | "task_open"
   | "task_search"
-  | "task_mutation";
+  | "task_mutation"
+  | "media_render";
 
 export type PerformanceMetric = {
   id: string;
@@ -153,6 +154,8 @@ export function formatMetricLabel(name: PerformanceMetricName): string {
       return "Search";
     case "task_mutation":
       return "Mutation";
+    case "media_render":
+      return "Media render";
     default:
       return name;
   }
