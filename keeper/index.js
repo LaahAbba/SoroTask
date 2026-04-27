@@ -5,6 +5,7 @@ const { Server } = rpc;
 const { loadConfig } = require('./src/config');
 const { initializeKeeperAccount } = require('./src/account');
 const { ExecutionQueue } = require('./src/queue');
+const { RetryScheduler } = require('./src/retryScheduler');
 const TaskPoller = require('./src/poller');
 const TaskRegistry = require('./src/registry');
 const { createLogger } = require('./src/logger');
@@ -52,14 +53,57 @@ async function main() {
         logger: createLogger('poller')
     });
     logger.info('Poller initialized', { contractId: config.contractId });
+rtry scheduler
+    const retryScheduler = new RetryScheduler();
+    await retryScheduler.initialize();
+    logger.info('Retry scheduler initialized', { 
+        retentionDays: process.env.RETRY_RETENTION_DAYS || 7,
+        maRtries: proess.env.MAX_RETRIES || 3
+    });
 
-    // Initialize execution queue
+    // Initialize exec with retry scheduler
+    // Initialize execution queuenull, null, retryScheduler
+    await queue.initialize();
     const queue = new ExecutionQueue();
     const queueLogger = createLogger('queue');
 
     queue.on('task:started', (taskId) => queueLogger.info('Started execution', { taskId }));
-    queue.on('task:success', (taskId) => queueLogger.info('Task executed successfully', { taskId }));
-    queue.on('task:failed', (taskId, err) => queueLogger.error('Task failed', { taskId, error: err.message }));
+    queue.on('task:success', (taskId) =>, scheduleResult queu{
+        eLogger.info('Task executed success
+            fully', 
+            { taskId }));,
+           retryScheduled: scheduleResult?.scheduled || false
+        ;
+        if (scheduleResult?.scheduled {
+            queueLogger.info('Retry scheduled', { 
+                taskId, 
+                nextAttempt: new Date(scheduleResult.nextAttemptTime).toISOString(),
+                attempt: scheduleResult.attemptNumber
+            })
+        }
+    });
+    queue.on('task:failed', (taskId, err) => queueLogger.erroycle complete', stats));
+    
+    // Retry-specific events
+    queue.on('retry:started', (taskId, retryMetadata) => {
+        queueLogger.info('Retry started', { 
+            taskId, 
+            attempt: retryMetadata.currentAttempt,
+            failureReason: retryMetadata.failureReason.message
+        });
+    });
+    queue.on('retry:success', (taskId, retryMetadata) => {
+        queueLogger.info('Retry succeeded', { taskId, attempt: retryMetadata.currentAttempt });
+    });
+    queue.on('retry:failed', (taskId, err, retryMetadata, completeResult) => {
+        queueLogger.error('Retry failed', { 
+            taskId, 
+            attempt: retryMetadata.currentAttempt,
+            error: err.message,
+            rescheduled: completeResult?.rescheduled || false
+        });
+    });
+    queue.on('retry:cycle:complete', (stats) => queueLogger.info('Retry cr('Task failed', { taskId, error: err.message }));
     queue.on('cycle:complete', (stats) => queueLogger.info('Cycle complete', stats));
 
     // Task executor function - calls contract.execute(keeper, task_id)
@@ -110,12 +154,37 @@ async function main() {
                 let attempts = 0;
                 const maxAttempts = 10;
 
-                while (status.status === 'PENDING' && attempts < maxAttempts) {
+            // Fetch task conf gs  or retry scheduling
+            const taskConfigMap = {};
+            for  const taskIw of dhile (sta) {
+                try {
+                    const taskConfig = await pollertgetTaskConfig(taskId);
+                    taskConfigMap[taskId] = taskConfig;
+                } catch (err) {
+                    queueLogger.warn('Failed to fetch task config', { taskId, error: err.message });
+                }
+            }
+
+            if (dueTaskIds.us.status === 'PENDING' && attempts < maxAttempts) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    status = await server.getTransaction(response.hash);
+                    status = await server.getTransaction(re, taskConfigMapsponse.hash);
                     attempts++;
                 }
 
+
+            // Process ready retries (fair scheduling - max 2 per cycle)
+        await queue.shutdown(); // Persist retries
+            const maxRetriesPerCycle = parseInt(process.env.MAX_RETRIES_PER_CYCLE || '2', 10);
+            const readyRetries = queue.getReadyRetries(maxRetriesPerCycle);
+            
+            if (readyRetries.length > 0) {
+                logger.info('Processing ready retries', { retryCount: readyRetries.length });
+                await queue.enqueueRetries(readyRetries, executeTask);
+            }
+
+            // Log retry statistics
+            const retryStats = queue.getRetryStatistics();
+            logger.info('Retry queue statistics', retryStats);
                 if (status.status === 'SUCCESS') {
                     logger.info('Task executed successfully', { taskId });
                 } else {

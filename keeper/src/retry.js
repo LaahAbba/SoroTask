@@ -267,7 +267,7 @@ export async function withRetry(fn, options = {}) {
  * @param {number} delay - Delay between attempts in milliseconds
  * @returns {Promise<*>}
  */
-export async function retry(fn, attempts = 3, delay = 1000) {
+async function retry(fn, attempts = 3, delay = 1000) {
   return withRetry(fn, {
     maxRetries: attempts - 1,
     baseDelayMs: delay,
@@ -280,7 +280,7 @@ export async function retry(fn, attempts = 3, delay = 1000) {
  * @param {Error} error - The error to check
  * @returns {boolean} - True if the error is retryable
  */
-export function isRetryableError(error) {
+function isRetryableError(error) {
   return classifyError(error) === ErrorClassification.RETRYABLE;
 }
 
@@ -289,9 +289,17 @@ export function isRetryableError(error) {
  * @param {Error} error - The error to check
  * @returns {boolean} - True if the error indicates a duplicate
  */
-export function isDuplicateTransactionError(error) {
+function isDuplicateTransactionError(error) {
   return classifyError(error) === ErrorClassification.DUPLICATE;
 }
 
-// Export error classifications for external use
-export { ErrorClassification };
+// CommonJS exports
+module.exports = {
+  withRetry,
+  retry,
+  classifyError,
+  calculateDelay,
+  isRetryableError,
+  isDuplicateTransactionError,
+  ErrorClassification,
+};

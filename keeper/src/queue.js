@@ -1,8 +1,9 @@
 const EventEmitter = require('events');
 const { createConcurrencyLimit } = require('./concurrency');
+const { RetryScheduler } = require('./retryScheduler');
 
 class ExecutionQueue extends EventEmitter {
-  constructor(limit, metricsServer) {
+  constructor(limit, metricsServer, retryScheduler) {
     super();
 
     this.concurrencyLimit = parseInt(
@@ -12,6 +13,7 @@ class ExecutionQueue extends EventEmitter {
 
     this.limit = createConcurrencyLimit(this.concurrencyLimit);
     this.metricsServer = metricsServer;
+    this.retryScheduler = retryScheduler || new RetryScheduler();
 
     this.depth = 0;
     this.inFlight = 0;
@@ -20,11 +22,51 @@ class ExecutionQueue extends EventEmitter {
 
     this.activePromises = [];
     this.failedTasks = new Set();
+
+    // Retry tracking
+    this.retryTaskIds = new Set(); // Tasks being retried in current cycle
   }
 
-  async enqueue(taskIds, executorFn) {
+  /**
+   * Initialize the retry scheduler
+   */
+  async initialize() {
+    await this.retryScheduler.initialize();
+  }
+
+  /**
+   * Get tasks ready for retry (fair scheduling)
+   * Returns a limited number of retries to prevent them from overtaking normal tasks
+   *
+   * @param {number} maxRetriesPerCycle - Maximum retries to process per cycle
+   * @returns {Array} - Array of task IDs ready for retry
+   */
+  getReadyRetries(maxRetriesPerCycle = 2) {
+    const readyRetries = this.retryScheduler.getReadyRetries();
+
+    // Limit retries per cycle to ensure fairness
+    // Retries should not overwhelm normal due tasks
+    const limitedRetries = readyRetries.slice(0, maxRetriesPerCycle);
+
+    // Mark these as being retried to prevent duplicates
+    limitedRetries.forEach(retry => {
+      this.retryTaskIds.add(retry.taskId);
+    });
+
+    return limitedRetries;
+  }
+
+  /**
+   * Enqueue normal due tasks
+   *
+   * @param {Array} taskIds - Task IDs to execute
+   * @param {Function} executorFn - Executor function
+   * @param {Object} taskConfigMap - Map of taskId to task config (for retry scheduling)
+   */
+  async enqueue(taskIds, executorFn, taskConfigMap = {}) {
+    // Filter out tasks that are already being retried
     const validTaskIds = taskIds.filter(
-      (id) => !this.failedTasks.has(id),
+      (id) => !this.failedTasks.has(id) && !this.retryTaskIds.has(id),
     );
 
     this.depth = validTaskIds.length;
@@ -46,6 +88,10 @@ class ExecutionQueue extends EventEmitter {
         try {
           await executorFn(taskId);
           this.completed++;
+
+          // Remove from retry queue if it was there
+          await this.retryScheduler.completeRetry(taskId, true);
+
           if (this.metricsServer) {
             this.metricsServer.increment('tasksExecutedTotal', 1);
           }
@@ -53,10 +99,27 @@ class ExecutionQueue extends EventEmitter {
         } catch (error) {
           this.failedCount++;
           this.failedTasks.add(taskId);
+
+          // Schedule retry for retryable errors
+          const taskConfig = taskConfigMap[taskId];
+          const retryMetadata = this.retryScheduler.getRetryMetadata(taskId);
+          const currentAttempt = retryMetadata?.currentAttempt || 0;
+
+          const scheduleResult = await this.retryScheduler.scheduleRetry({
+            taskId,
+            error,
+            currentAttempt,
+            taskConfig,
+          });
+
           if (this.metricsServer) {
             this.metricsServer.increment('tasksFailedTotal', 1);
+            if (scheduleResult.scheduled) {
+              this.metricsServer.increment('retriesScheduledTotal', 1);
+            }
           }
-          this.emit('task:failed', taskId, error);
+
+          this.emit('task:failed', taskId, error, scheduleResult);
         } finally {
           this.inFlight--;
         }
@@ -85,6 +148,86 @@ class ExecutionQueue extends EventEmitter {
       this.activePromises = [];
       this.completed = 0;
       this.failedCount = 0;
+
+      // Clear retry task IDs for next cycle
+      this.retryTaskIds.clear();
+    }
+  }
+
+  /**
+   * Enqueue retry tasks (separate from normal tasks for fairness)
+   *
+   * @param {Array} retryTasks - Array of retry metadata objects
+   * @param {Function} executorFn - Executor function
+   */
+  async enqueueRetries(retryTasks, executorFn) {
+    if (retryTasks.length === 0) {
+      return;
+    }
+
+    this.depth += retryTasks.length;
+
+    const cycleStartTime = Date.now();
+
+    const cyclePromises = retryTasks.map((retryTask) => {
+      return this.limit(async () => {
+        const { taskId } = retryTask;
+        this.inFlight++;
+        this.depth = Math.max(this.depth - 1, 0);
+
+        this.emit('retry:started', taskId, retryTask);
+
+        try {
+          await executorFn(taskId);
+          this.completed++;
+
+          // Mark retry as successful
+          await this.retryScheduler.completeRetry(taskId, true);
+
+          if (this.metricsServer) {
+            this.metricsServer.increment('retriesExecutedTotal', 1);
+            this.metricsServer.increment('tasksExecutedTotal', 1);
+          }
+          this.emit('retry:success', taskId, retryTask);
+        } catch (error) {
+          this.failedCount++;
+
+          // Update retry status (may reschedule if not at max retries)
+          const completeResult = await this.retryScheduler.completeRetry(taskId, false);
+
+          if (this.metricsServer) {
+            this.metricsServer.increment('retriesFailedTotal', 1);
+          }
+
+          this.emit('retry:failed', taskId, error, retryTask, completeResult);
+        } finally {
+          this.inFlight--;
+        }
+      });
+    });
+
+    this.activePromises.push(...cyclePromises);
+
+    try {
+      await Promise.all(cyclePromises);
+    } catch (_) {
+      // already handled
+    } finally {
+      const cycleDuration = Date.now() - cycleStartTime;
+      if (this.metricsServer?.record) {
+        this.metricsServer.record('lastRetryCycleDurationMs', cycleDuration);
+      }
+
+      this.emit('retry:cycle:complete', {
+        depth: retryTasks.length,
+        inFlight: this.inFlight,
+        completed: this.completed,
+        failed: this.failedCount,
+      });
+
+      this.activePromises = [];
+      this.completed = 0;
+      this.failedCount = 0;
     }
   }
 
@@ -99,6 +242,20 @@ class ExecutionQueue extends EventEmitter {
     while (this.inFlight > 0) {
       await new Promise((r) => setTimeout(r, 50));
     }
+  }
+
+  /**
+   * Get retry queue statistics
+   */
+  getRetryStatistics() {
+    return this.retryScheduler.getStatistics();
+  }
+
+  /**
+   * Shutdown gracefully
+   */
+  async shutdown() {
+    await this.retryScheduler.shutdown();
   }
 }
 
