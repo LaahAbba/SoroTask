@@ -71,8 +71,30 @@ export default function Home() {
           </div>
 
       <main className="container mx-auto px-6 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          {/* Create Task Section */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
+          <div>
+            <h2 className="text-3xl font-bold">Your Keeper Dashboard</h2>
+            <p className="text-neutral-400">Create, manage, and reorder recurring tasks with instant feedback.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={syncTasks}
+              className="rounded-lg border border-neutral-700/80 bg-neutral-800/80 px-4 py-2 text-sm text-neutral-200 transition hover:border-neutral-500"
+            >
+              {isLoading ? 'Refreshing…' : 'Refresh tasks'}
+            </button>
+            <div className="text-sm text-neutral-400">{activeTaskCount} active tasks</div>
+          </div>
+        </div>
+
+        {globalError ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 mb-6">
+            {globalError}
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-1 gap-12 xl:grid-cols-[1.1fr_1fr]">
           <section className="space-y-6">
             <h2 className="text-2xl font-bold">Create Automation Task</h2>
             <form onSubmit={handleSubmit} className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
@@ -137,18 +159,159 @@ export default function Home() {
             </form>
           </section>
 
-          {/* Your Tasks Section */}
           <section className="space-y-6">
-            <h2 className="text-2xl font-bold">Your Tasks</h2>
-            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 min-h-[300px] flex flex-col items-center justify-center text-neutral-500 shadow-xl">
-              <p>No tasks registered yet.</p>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-2xl font-bold">Your Tasks</h3>
+              <span className="rounded-full border border-neutral-700/70 bg-neutral-950/60 px-3 py-1 text-xs text-neutral-300">
+                {tasks.length} total
+              </span>
+            </div>
+            <div className="overflow-hidden rounded-3xl border border-neutral-700/50 bg-neutral-900/80 shadow-xl">
+              <table className="min-w-full text-left text-sm text-neutral-200">
+                <thead className="border-b border-neutral-800 bg-neutral-950/90 text-neutral-300">
+                  <tr>
+                    <th className="px-5 py-4">Task</th>
+                    <th className="px-5 py-4">Interval</th>
+                    <th className="px-5 py-4">Balance</th>
+                    <th className="px-5 py-4">Status</th>
+                    <th className="px-5 py-4">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800 bg-neutral-900">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-center text-neutral-400">
+                        Loading tasks…
+                      </td>
+                    </tr>
+                  ) : tasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-center text-neutral-500">
+                        No tasks registered yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    tasks.map((task, index) => {
+                      const status = taskStatus[task.id]
+                      const isPending = status?.pending ?? false
+                      const errorText = status?.error
+                      const isEditing = editingTaskId === task.id
+
+                      return (
+                        <tr
+                          key={task.id}
+                          className={isPending ? 'bg-blue-500/10' : 'hover:bg-neutral-800/50 transition-colors'}
+                        >
+                          <td className="px-5 py-4">
+                            <div className="font-medium text-white">{task.func}</div>
+                            <div className="mt-1 text-xs text-neutral-400 font-mono">{task.target}</div>
+                          </td>
+                          <td className="px-5 py-4">
+                            {isEditing ? (
+                              <input
+                                value={editDraft.interval}
+                                onChange={(event) => setEditDraft((current) => ({ ...current, interval: event.target.value }))}
+                                type="number"
+                                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                              />
+                            ) : (
+                              <span className="font-mono text-neutral-300">{task.interval}s</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-4">
+                            {isEditing ? (
+                              <input
+                                value={editDraft.balance}
+                                onChange={(event) => setEditDraft((current) => ({ ...current, balance: event.target.value }))}
+                                type="number"
+                                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                              />
+                            ) : (
+                              <span className="font-mono text-neutral-300">{task.balance} XLM</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span
+                              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                                isPending
+                                  ? 'bg-blue-500/15 text-blue-200 ring-1 ring-blue-500/25'
+                                  : 'bg-green-500/10 text-green-300 ring-1 ring-green-500/25'
+                              }`}
+                            >
+                              {isPending ? 'Pending' : 'Active'}
+                            </span>
+                            {errorText ? (
+                              <div className="mt-2 text-xs text-red-300">{errorText}</div>
+                            ) : null}
+                          </td>
+                          <td className="px-5 py-4 space-y-2">
+                            {isEditing ? (
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => applyEdit(task)}
+                                  disabled={isPending}
+                                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingTaskId(null)}
+                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => buildDraft(task)}
+                                  disabled={isPending}
+                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTask(task.id)}
+                                  disabled={isPending}
+                                  className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-60"
+                                >
+                                  Delete
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveTask(task.id, -1)}
+                                  disabled={isPending || index === 0}
+                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500 disabled:opacity-40"
+                                >
+                                  Up
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveTask(task.id, 1)}
+                                  disabled={isPending || index === tasks.length - 1}
+                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500 disabled:opacity-40"
+                                >
+                                  Down
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
 
-        {/* Execution Logs */}
         <section className="mt-16 space-y-6">
-          <h2 className="text-2xl font-bold">Execution Logs</h2>
+          <h3 className="text-2xl font-bold">Execution Logs</h3>
           <div className="overflow-hidden rounded-xl border border-neutral-700/50 shadow-xl">
             <table className="w-full text-left text-sm text-neutral-400">
               <thead className="bg-neutral-800/80 text-neutral-200 backdrop-blur-sm">
@@ -161,7 +324,6 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800 bg-neutral-900/50">
-                {/* Mock Row */}
                 <tr className="hover:bg-neutral-800/50 transition-colors">
                   <td className="px-6 py-4 font-mono text-neutral-300">#1024</td>
                   <td className="px-6 py-4 font-mono">CC...A12B</td>
@@ -232,7 +394,7 @@ export default function Home() {
         </form>
       </div>
     </div>
-  );
+  )
 }
 
 /* ─── Task Card (Your Tasks) ─────────────────────────────────────────── */
