@@ -356,6 +356,13 @@ export default function Home() {
                   <td className="px-6 py-4">
                     <TransactionStatus status="success" compact />
                   </td>
+                  <td className="px-6 py-4">
+                    <a href={`${STELLAR_EXPERT_BASE}/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="font-mono text-blue-400 hover:text-blue-300 underline transition-colors">
+                      a1b2c3d4…a1b2
+                    </a>
+                  </td>
                   <td className="px-6 py-4">2 mins ago</td>
                 </tr>
               </tbody>
