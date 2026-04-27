@@ -108,6 +108,7 @@ export default function Home() {
                   className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
                 />
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
                 <input 
@@ -118,6 +119,7 @@ export default function Home() {
                   className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
                 />
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
@@ -129,6 +131,7 @@ export default function Home() {
                     className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
                   />
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
                   <input 
@@ -323,6 +326,7 @@ export default function Home() {
                   <th className="px-6 py-4 font-medium">Timestamp</th>
                 </tr>
               </thead>
+
               <tbody className="divide-y divide-neutral-800 bg-neutral-900/50">
                 <tr className="hover:bg-neutral-800/50 transition-colors">
                   <td className="px-6 py-4 font-mono text-neutral-300">
